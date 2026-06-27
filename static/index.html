@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VerticalAgent Stage 0 — 对话 Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f7fa;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* 顶部状态栏 */
+  header {
+    background: #1f4e79;
+    color: #fff;
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header .status { font-size: 12px; opacity: 0.85; }
+  header .status .dot {
+    display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; background: #4caf50; margin-right: 5px;
+  }
+  header .status .dot.offline { background: #f44336; }
+  header button {
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: #fff;
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  header button:hover { background: rgba(255,255,255,0.25); }
+
+  /* 聊天区域 */
+  main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  .msg { margin: 12px 0; display: flex; }
+  .msg.user { justify-content: flex-end; }
+  .msg .bubble {
+    max-width: 75%;
+    padding: 10px 14px;
+    border-radius: 10px;
+    line-height: 1.6;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+  }
+  .msg.user .bubble {
+    background: #1f4e79;
+    color: #fff;
+    border-bottom-right-radius: 2px;
+  }
+  .msg.assistant .bubble {
+    background: #fff;
+    color: #333;
+    border: 1px solid #e0e0e0;
+    border-bottom-left-radius: 2px;
+  }
+  .msg.system .bubble {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+    text-align: center;
+    font-size: 13px;
+    max-width: 90%;
+  }
+  .msg.error .bubble {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+  }
+  .msg .meta {
+    font-size: 11px;
+    color: #888;
+    margin-top: 4px;
+  }
+  .msg.user .meta { text-align: right; }
+
+  /* 输入区域 */
+  footer {
+    background: #fff;
+    border-top: 1px solid #e0e0e0;
+    padding: 12px 20px;
+  }
+  .input-area {
+    max-width: 900px;
+    margin: 0 auto;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+  .input-area textarea {
+    flex: 1;
+    border: 1px solid #d0d0d0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    min-height: 44px;
+    max-height: 200px;
+    outline: none;
+  }
+  .input-area textarea:focus { border-color: #1f4e79; }
+  .input-area button {
+    background: #1f4e79;
+    color: #fff;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    min-width: 80px;
+  }
+  .input-area button:hover:not(:disabled) { background: #163d5e; }
+  .input-area button:disabled { background: #999; cursor: not-allowed; }
+
+  /* loading */
+  .typing { display: inline-block; }
+  .typing span {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #888;
+    margin: 0 2px;
+    animation: bounce 1.4s infinite;
+  }
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-6px); opacity: 1; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🤖 VerticalAgent Stage 0</h1>
+    <div class="status">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">就绪</span>
+      <span id="sessionInfo"></span>
+    </div>
+  </div>
+  <button onclick="newSession()">新会话</button>
+</header>
+
+<main id="chat">
+  <div class="msg system">
+    <div class="bubble">
+      👋 欢迎！这是阶段 0 Demo。我能基于 LLM 回答问题，<br>
+      支持 <b>多轮对话</b>，每次响应会显示 <b>Token 用量 + 延迟</b>。
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="input-area">
+    <textarea id="input" placeholder="输入消息，回车发送，Shift+回车换行..." rows="1"></textarea>
+    <button id="sendBtn" onclick="send()">发送</button>
+  </div>
+</footer>
+
+<script>
+let sessionId = null;
+let isWaiting = false;
+
+const chatEl = document.getElementById('chat');
+const inputEl = document.getElementById('input');
+const sendBtn = document.getElementById('sendBtn');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const sessionInfo = document.getElementById('sessionInfo');
+
+// 1. 健康检查
+async function checkHealth() {
+  try {
+    const r = await fetch('/health');
+    if (r.ok) {
+      const d = await r.json();
+      statusText.textContent = `就绪 · ${d.provider}/${d.model}`;
+      statusDot.classList.remove('offline');
+    } else {
+      setOffline();
+    }
+  } catch (e) {
+    setOffline();
+  }
+}
+function setOffline() {
+  statusText.textContent = '后端离线';
+  statusDot.classList.add('offline');
+}
+
+// 2. 发送消息
+async function send() {
+  if (isWaiting) return;
+  const msg = inputEl.value.trim();
+  if (!msg) return;
+
+  // UI: 展示用户消息
+  appendMsg('user', msg);
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+  setWaiting(true);
+
+  // UI: loading
+  const loadingEl = appendMsg('assistant', '<span class="typing"><span></span><span></span><span></span></span>', true);
+
+  try {
+    const r = await fetch('/chat?' + new URLSearchParams({
+      message: msg,
+      session_id: sessionId || '',
+    }), { method: 'POST' });
+
+    loadingEl.remove();
+
+    if (!r.ok) {
+      const err = await r.json();
+      const errType = err.detail?.error_type || 'unknown';
+      const errMsg = err.detail?.message || r.statusText;
+      appendMsg('error', `❌ [${errType}] ${errMsg}`);
+      return;
+    }
+
+    const data = await r.json();
+    sessionId = data.session_id;
+    sessionInfo.textContent = ` · session: ${sessionId.slice(0, 8)}...`;
+
+    appendMsg('assistant', data.reply, false,
+      `📊 ${data.usage.total_tokens} tokens (输入 ${data.usage.prompt_tokens} / 输出 ${data.usage.completion_tokens}) · ⏱️ ${(data.latency_ms / 1000).toFixed(2)}s · 🤖 ${data.model}`);
+
+  } catch (e) {
+    loadingEl.remove();
+    appendMsg('error', `❌ 网络错误: ${e.message}`);
+  } finally {
+    setWaiting(false);
+    inputEl.focus();
+  }
+}
+
+// 3. 新会话
+async function newSession() {
+  if (sessionId) {
+    try {
+      await fetch(`/sessions/${sessionId}`, { method: 'DELETE' });
+    } catch (e) {}
+  }
+  sessionId = null;
+  sessionInfo.textContent = '';
+  chatEl.innerHTML = `
+    <div class="msg system">
+      <div class="bubble">🆕 新的会话开始了</div>
+    </div>
+  `;
+}
+
+// 4. UI helpers
+function appendMsg(role, text, isHtml = false, meta = '') {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  if (isHtml) {
+    bubble.innerHTML = text;
+  } else {
+    bubble.textContent = text;
+  }
+  div.appendChild(bubble);
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.textContent = meta;
+    div.appendChild(m);
+  }
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return div;
+}
+
+function setWaiting(waiting) {
+  isWaiting = waiting;
+  sendBtn.disabled = waiting;
+  sendBtn.textContent = waiting ? '...' : '发送';
+  inputEl.disabled = waiting;
+}
+
+// 5. 事件
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
+});
+
+// 启动
+checkHealth();
+setInterval(checkHealth, 30000);
+</script>
+
+</body>
+</html>

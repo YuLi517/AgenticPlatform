@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 环境变量（绝不入仓）
+.env
+.env.local
+
+# 虚拟环境
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# 日志
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
