@@ -28,6 +28,9 @@ cp .env.example .env
 python main.py
 
 # 5. 浏览器打开 http://localhost:8000
+
+> **.env 必须放在 stage0/ 目录里**（即 main.py 旁边）。
+> main.py 启动时会自动加载 `./env`，无需手动 source。
 ```
 
 > 详细文档看下方「快速启动」一节；遇到问题看「常见问题」。
@@ -60,6 +63,9 @@ cp .env.example .env
 # 推荐 DeepSeek（中文强 + 性价比高）
 LLM_API_KEY=sk-你的真实key
 ```
+
+> **.env 必须放在 main.py 所在的 stage0/ 目录里**。
+> 启动时 `python main.py` 会自动加载 `./env`，无需手动 export。
 
 ### 3. 启动
 
@@ -163,7 +169,8 @@ POST /chat?message=你好&session_id=可选
 ## 常见问题
 
 ### Q1: 启动报错 "LLM_API_KEY 未设置"
-答：没复制 `.env.example` 为 `.env`，或者 `.env` 里没填真实 key。
+答：没复制 `.env.example` 为 `.env`，或者 `.env` 里没填真实 key，或者 `.env` 不在 main.py 旁边。
+`.env` 必须放在 **stage0/ 目录里**（即 main.py 旁边），不是 `D:\Projects\Resume\` 根。
 
 ### Q2: 浏览器打开 127.0.0.1:8000 显示 "请将前端 index.html 放到 static/ 目录"
 答：说明你执行 `python` 的**当前目录**不是 `stage0/`，或者 `static/index.html` 不在。

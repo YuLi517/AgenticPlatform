@@ -53,12 +53,16 @@ from typing import List, Dict, Optional
 from collections import deque
 from threading import Lock
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from openai import OpenAI, APIError, APIConnectionError, RateLimitError, APITimeoutError, AuthenticationError, BadRequestError
+
+# 自动加载 main.py 旁边的 .env（无论从哪个目录启动都能加载到）
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 # ============== 配置 ==============
 

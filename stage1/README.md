@@ -40,6 +40,9 @@ cp .env.example .env
 # 推荐同时配置 DEEPSEEK + QEN，做 fallback 演示
 ```
 
+> **.env 必须放在 main.py 所在的 stage1/ 目录里**。
+> 启动时 `python main.py` 会自动加载 `./env`，无需手动 export。
+
 ### 3. 启动
 
 ```bash
@@ -242,6 +245,7 @@ DEEPSEEK_API_KEY=sk-fake-invalid-key
 ### Q1: 启动报错 "Provider 'xxx' 配置不完整"
 答：`.env` 里没填该 Provider 的 3 个环境变量（API_KEY / BASE_URL / MODEL）。
 最少要有一个 Provider 完整配置。
+`.env` 必须放在 **stage1/ 目录里**（即 main.py 旁边），不是仓库根。
 
 ### Q2: 浏览器 SSE 显示不出流式
 答：用最新 Chrome / Firefox / Edge 浏览器。SSE 兼容性：Chrome 6+ / Firefox 6+ / Edge 79+。
