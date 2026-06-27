@@ -42,17 +42,6 @@ python main.py
 - 4 类异常有友好兜底（限流 / 超时 / 网络 / 鉴权）
 - 单 LLM Provider（DeepSeek 兼容 OpenAI 协议）
 
-## 目录结构
-
-```
-stage0/
-├── main.py              # 后端（FastAPI + OpenAI SDK）
-├── static/
-│   └── index.html       # 前端（单文件 HTML + 原生 JS）
-├── .env.example         # 环境变量模板
-└── README.md            # 本文件
-```
-
 ## 快速启动
 
 ### 1. 装依赖
@@ -171,32 +160,6 @@ POST /chat?message=你好&session_id=可选
 | `BadRequestError` (400) | 内容审核 / 上下文过长 | **不重试** | "请求被拒绝" |
 | 其他 | 未知 | 不重试 | "未知错误: xxx" |
 
-## 阶段 0 明确不做的
-
-这些是设计文档里有、但**阶段 0 不做**的：
-
-- ❌ 数据库（内存 Map 存 session）
-- ❌ 多租户隔离
-- ❌ RAG / 知识库
-- ❌ 多模型路由（阶段 1 加）
-- ❌ 用户鉴权 / 登录
-- ❌ 流式响应 SSE（阶段 1 加）
-- ❌ Skills / MCP（阶段 3 加）
-- ❌ 可观测性 / 监控（阶段 4 加）
-- ❌ 计费 / 商业化（阶段 5 加）
-
-## 阶段 1 升级预告
-
-| 模块 | 阶段 0 → 阶段 1 |
-|---|---|
-| `Settings` | 加 `models: List[dict]` 支持多模型 |
-| `SessionManager` | 内存 dict → PostgreSQL + Redis |
-| `call_llm_with_retry` | 单 Provider → 多 Provider 路由 + 熔断 |
-| `/chat` | 加 `model` 参数 + 租户识别 |
-| 新增 | SSE 流式响应 |
-| 新增 | `/v1/models` 列出可用模型 |
-| 新增 | `/usage` 租户用量统计 |
-
 ## 常见问题
 
 ### Q1: 启动报错 "LLM_API_KEY 未设置"
@@ -217,15 +180,6 @@ LLM_API_KEY=sk-你的qwen-key
 LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_MODEL=qwen-plus
 ```
-
-### Q5: 想要流式响应（一个字一个字显示）
-答：阶段 1 加。先用当前整段返回版本体验一下业务流程。
-
-## 关联文档
-
-- 父级设计：[《VerticalAgent 平台工业级设计文档 v1.4.5》](../VerticalAgent平台工业级设计文档_v1.4.5.docx) (218KB)
-- 实施路线：[《Implementation Plan》](../Implementation_Plan.docx) (47KB)
-- 仓库入口：[README.md](../README.md)
 
 ## 许可
 
