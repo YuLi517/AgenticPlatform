@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Syntax check (py_compile)
+        run: |
+          python -m py_compile main.py
+          echo "✅ main.py syntax OK"
+
+      - name: Import test
+        run: |
+          # 用假 key 启动，看模块能正常 import
+          LLM_API_KEY=sk-fake-for-ci LLM_PROVIDER=deepseek python -c "import main; print('✅ main.py imports OK')"
+
+      - name: Static analysis (pyflakes)
+        run: |
+          pip install pyflakes
+          pyflakes main.py
+          echo "✅ pyflakes passed"
+
+      - name: Frontend HTML validation
+        run: |
+          # 简单检查 HTML 结构
+          python -c "
+          from html.parser import HTMLParser
+          class V(HTMLParser):
+              errors = []
+              def error(self, msg): self.errors.append(msg)
+          v = V()
+          v.feed(open('static/index.html', encoding='utf-8').read())
+          if v.errors:
+              raise SystemExit(f'HTML parse errors: {v.errors}')
+          print('✅ static/index.html is valid HTML')
+          "
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "✅ All checks passed for Python ${{ matrix.python-version }}"

@@ -3,6 +3,41 @@
 > 基于 [《VerticalAgent 平台工业级设计文档 v1.4.5》](../VerticalAgent平台工业级设计文档_v1.4.5.docx) 的
 > [《Implementation Plan》](../Implementation_Plan.docx) **阶段 0** 完整可跑代码。
 
+[![GitHub stars](https://img.shields.io/github/stars/YuLi517/AgenticPlatform?style=flat-square)](https://github.com/YuLi517/AgenticPlatform/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/YuLi517/AgenticPlatform?style=flat-square)](https://github.com/YuLi517/AgenticPlatform/network)
+[![License](https://img.shields.io/github/license/YuLi517/AgenticPlatform?style=flat-square)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square)](https://www.python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688?style=flat-square)](https://fastapi.tiangolo.com)
+[![CI](https://img.shields.io/github/actions/workflow/status/YuLi517/AgenticPlatform/ci.yml?style=flat-square)](https://github.com/YuLi517/AgenticPlatform/actions)
+
+## ⚡ 30 秒快速开始
+
+```bash
+# 1. 克隆
+git clone https://github.com/YuLi517/AgenticPlatform.git
+cd AgenticPlatform
+
+# 2. 装依赖（需要 Python 3.10+）
+pip install -r requirements.txt
+
+# 3. 配 API Key
+cp .env.example .env
+# 编辑 .env 填入 LLM_API_KEY（推荐 DeepSeek）
+
+# 4. 启动
+python main.py
+
+# 5. 浏览器打开 http://localhost:8000
+```
+
+> 详细文档看下方「快速启动」一节；遇到问题看「常见问题」。
+
+---
+
+## 这是什么
+
+一个**单租户**的 Web 对话 Demo，**30 分钟内**能跑起来：
+
 ## 这是什么
 
 一个**单租户**的 Web 对话 Demo，**30 分钟内**能跑起来：
