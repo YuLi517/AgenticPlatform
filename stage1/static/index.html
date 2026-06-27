@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VerticalAgent Stage 1 — 多 Provider 流式对话</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f7fa; height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    background: #1f4e79; color: #fff; padding: 12px 20px;
+    display: flex; justify-content: space-between; align-items: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header .status { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+  header .controls { display: flex; gap: 8px; align-items: center; }
+  header select, header button {
+    background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
+    color: #fff; padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+  }
+  header select option { background: #1f4e79; color: #fff; }
+  header button:hover { background: rgba(255,255,255,0.25); }
+  main {
+    flex: 1; overflow-y: auto; padding: 20px;
+    max-width: 900px; width: 100%; margin: 0 auto;
+  }
+  .msg { margin: 12px 0; display: flex; }
+  .msg.user { justify-content: flex-end; }
+  .msg .bubble {
+    max-width: 75%; padding: 10px 14px; border-radius: 10px;
+    line-height: 1.6; word-wrap: break-word; white-space: pre-wrap;
+  }
+  .msg.user .bubble { background: #1f4e79; color: #fff; border-bottom-right-radius: 2px; }
+  .msg.assistant .bubble { background: #fff; color: #333; border: 1px solid #e0e0e0; border-bottom-left-radius: 2px; }
+  .msg.system .bubble { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; text-align: center; font-size: 13px; max-width: 90%; }
+  .msg.error .bubble { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+  .msg .meta { font-size: 11px; color: #888; margin-top: 4px; }
+  .msg.user .meta { text-align: right; }
+  .cursor { display: inline-block; width: 7px; height: 14px; background: #1f4e79; animation: blink 1s infinite; vertical-align: text-bottom; }
+  @keyframes blink { 50% { opacity: 0; } }
+  footer { background: #fff; border-top: 1px solid #e0e0e0; padding: 12px 20px; }
+  .input-area { max-width: 900px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; }
+  .input-area textarea {
+    flex: 1; border: 1px solid #d0d0d0; border-radius: 8px; padding: 10px 14px;
+    font-size: 14px; font-family: inherit; resize: none;
+    min-height: 44px; max-height: 200px; outline: none;
+  }
+  .input-area textarea:focus { border-color: #1f4e79; }
+  .input-area button {
+    background: #1f4e79; color: #fff; border: none; padding: 12px 24px;
+    border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; min-width: 80px;
+  }
+  .input-area button:hover:not(:disabled) { background: #163d5e; }
+  .input-area button:disabled { background: #999; cursor: not-allowed; }
+  .provider-pill {
+    display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px;
+    background: #e3f2fd; color: #1565c0; margin-right: 4px;
+  }
+  .provider-pill.fallback { background: #fff3cd; color: #856404; }
+  .provider-pill.error { background: #f8d7da; color: #721c24; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🤖 VerticalAgent Stage 1</h1>
+    <div class="status" id="status">就绪 · 多 Provider 流式对话</div>
+  </div>
+  <div class="controls">
+    <select id="providerSelect" title="选择 Provider">
+      <option value="">Auto (按优先级)</option>
+    </select>
+    <button id="streamBtn" onclick="toggleStream()" title="流式开关">📡 流式 ON</button>
+    <button onclick="newSession()">新会话</button>
+  </div>
+</header>
+
+<main id="chat">
+  <div class="msg system">
+    <div class="bubble">
+      👋 阶段 1 Demo：多 Provider 路由 + SSE 流式响应 + 熔断器<br>
+      <small>输入消息，回车发送 · 可在右上角选 Provider · 流式模式下一个字一个字显示</small>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="input-area">
+    <textarea id="input" placeholder="输入消息，回车发送，Shift+回车换行..." rows="1"></textarea>
+    <button id="sendBtn" onclick="send()">发送</button>
+  </div>
+</footer>
+
+<script>
+let sessionId = null;
+let isWaiting = false;
+let streamMode = true;
+
+const chatEl = document.getElementById('chat');
+const inputEl = document.getElementById('input');
+const sendBtn = document.getElementById('sendBtn');
+const streamBtn = document.getElementById('streamBtn');
+const providerSelect = document.getElementById('providerSelect');
+const statusEl = document.getElementById('status');
+
+// 1. 加载 providers
+async function loadProviders() {
+  try {
+    const r = await fetch('/v1/models');
+    const d = await r.json();
+    d.providers.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.provider;
+      const state = p.state === 'closed' ? '✅' : (p.state === 'open' ? '🔴' : '🟡');
+      opt.textContent = `${state} ${p.provider} (${p.model})`;
+      providerSelect.appendChild(opt);
+    });
+    updateStatus();
+  } catch (e) {
+    statusEl.textContent = '❌ 后端离线';
+  }
+}
+
+function updateStatus() {
+  fetch('/v1/models').then(r => r.json()).then(d => {
+    const summary = d.providers.map(p => {
+      const s = p.state === 'closed' ? '✅' : p.state === 'open' ? '🔴' : '🟡';
+      return `${s}${p.provider}`;
+    }).join(' | ');
+    statusEl.textContent = `就绪 · ${summary}`;
+  });
+}
+
+function toggleStream() {
+  streamMode = !streamMode;
+  streamBtn.textContent = streamMode ? '📡 流式 ON' : '📦 整段 ON';
+  streamBtn.style.background = streamMode ? 'rgba(76, 175, 80, 0.4)' : 'rgba(255,255,255,0.15)';
+}
+
+async function send() {
+  if (isWaiting) return;
+  const msg = inputEl.value.trim();
+  if (!msg) return;
+
+  const selectedProvider = providerSelect.value;
+  appendMsg('user', msg);
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+  setWaiting(true);
+
+  if (streamMode) {
+    await sendStream(msg, selectedProvider);
+  } else {
+    await sendNonStream(msg, selectedProvider);
+  }
+}
+
+async function sendStream(msg, provider) {
+  const assistantEl = appendMsg('assistant', '<span class="cursor"></span>');
+  const bubble = assistantEl.querySelector('.bubble');
+  let fullText = '';
+
+  try {
+    const r = await fetch('/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: msg,
+        session_id: sessionId,
+        provider: provider || null,
+      }),
+    });
+
+    if (!r.ok) {
+      const err = await r.json();
+      bubble.innerHTML = `❌ [${err.detail?.error_type}] ${err.detail?.error_msg || r.statusText}`;
+      bubble.parentElement.classList.add('error');
+      return;
+    }
+
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let usage = {};
+    let providerUsed = '';
+    let fallbackUsed = false;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // 解析 SSE: event: xxx\ndata: {...}\n\n
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';
+
+      for (const ev of events) {
+        const lines = ev.split('\n');
+        let eventName = 'message';
+        let dataLine = '';
+        for (const line of lines) {
+          if (line.startsWith('event:')) eventName = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLine += line.slice(5).trim();
+        }
+        if (!dataLine) continue;
+
+        try {
+          const data = JSON.parse(dataLine);
+          if (eventName === 'start') {
+            sessionId = data.session_id;
+            providerUsed = data.primary_provider;
+          } else if (eventName === 'delta') {
+            fullText += data.delta;
+            bubble.innerHTML = escapeHtml(fullText) + '<span class="cursor"></span>';
+            chatEl.scrollTop = chatEl.scrollHeight;
+            providerUsed = data.provider;
+          } else if (eventName === 'done') {
+            usage = data.usage || {};
+            if (data.provider && data.provider !== providerUsed) {
+              fallbackUsed = true;
+            }
+            providerUsed = data.provider;
+            bubble.innerHTML = escapeHtml(fullText);
+            const meta = assistantEl.querySelector('.meta') || (() => {
+              const m = document.createElement('div');
+              m.className = 'meta';
+              assistantEl.appendChild(m);
+              return m;
+            })();
+            const pillClass = fallbackUsed ? 'provider-pill fallback' : 'provider-pill';
+            const fallbackTag = fallbackUsed ? '⚡fallback' : '';
+            meta.innerHTML = `<span class="${pillClass}">${providerUsed}</span>${fallbackTag} ` +
+                             `📊 ${usage.completion_tokens || 0} tokens · 🌊 SSE`;
+          } else if (eventName === 'error') {
+            bubble.innerHTML = `❌ [${data.error_type}] ${data.error_msg}`;
+            bubble.parentElement.classList.add('error');
+          }
+        } catch (e) {
+          console.error('SSE parse error:', e, dataLine);
+        }
+      }
+    }
+  } catch (e) {
+    bubble.innerHTML = `❌ 网络错误: ${e.message}`;
+    bubble.parentElement.classList.add('error');
+  }
+}
+
+async function sendNonStream(msg, provider) {
+  const loadingEl = appendMsg('assistant', '<span class="cursor"></span>', true);
+  try {
+    const r = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: msg,
+        session_id: sessionId,
+        provider: provider || null,
+      }),
+    });
+    loadingEl.remove();
+
+    if (!r.ok) {
+      const err = await r.json();
+      appendMsg('error', `❌ [${err.detail?.error_type}] ${err.detail?.error_msg}`);
+      return;
+    }
+
+    const data = await r.json();
+    sessionId = data.session_id;
+    const pillClass = data.fallback_used ? 'provider-pill fallback' : 'provider-pill';
+    const fallbackTag = data.fallback_used ? '⚡fallback' : '';
+    appendMsg('assistant', data.reply, false,
+      `<span class="${pillClass}">${data.provider}</span>${fallbackTag} ` +
+      `📊 ${data.usage.total_tokens} tokens (${data.usage.prompt_tokens}+${data.usage.completion_tokens}) · ` +
+      `⏱️ ${(data.latency_ms/1000).toFixed(2)}s · 📦 整段`
+    );
+  } catch (e) {
+    loadingEl.remove();
+    appendMsg('error', `❌ 网络错误: ${e.message}`);
+  } finally {
+    setWaiting(false);
+    inputEl.focus();
+  }
+}
+
+async function newSession() {
+  if (sessionId) {
+    try { await fetch(`/sessions/${sessionId}`, { method: 'DELETE' }); } catch (e) {}
+  }
+  sessionId = null;
+  chatEl.innerHTML = `<div class="msg system"><div class="bubble">🆕 新的会话开始了</div></div>`;
+}
+
+function appendMsg(role, text, isHtml = false, meta = '') {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  if (isHtml) bubble.innerHTML = text;
+  else bubble.textContent = text;
+  div.appendChild(bubble);
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.innerHTML = meta;
+    div.appendChild(m);
+  }
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return div;
+}
+
+function escapeHtml(s) {
+  const map = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+  return s.replace(/[&<>"']/g, c => map[c]);
+}
+
+function setWaiting(waiting) {
+  isWaiting = waiting;
+  sendBtn.disabled = waiting;
+  sendBtn.textContent = waiting ? '...' : '发送';
+  inputEl.disabled = waiting;
+}
+
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
+});
+
+loadProviders();
+setInterval(updateStatus, 30000);
+</script>
+
+</body>
+</html>

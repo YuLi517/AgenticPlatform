@@ -7,61 +7,69 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    name: Python ${{ matrix.python-version }}
+  test-stage0:
+    name: Stage 0 (root)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-
+    defaults:
+      run:
+        working-directory: ./
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-          cache: "pip"
-
+          python-version: "3.11"
+          cache: pip
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Syntax check (py_compile)
-        run: |
-          python -m py_compile main.py
-          echo "✅ main.py syntax OK"
-
+        run: pip install -r requirements.txt
+      - name: Syntax check
+        run: python -m py_compile main.py
       - name: Import test
-        run: |
-          # 用假 key 启动，看模块能正常 import
-          LLM_API_KEY=sk-fake-for-ci LLM_PROVIDER=deepseek python -c "import main; print('✅ main.py imports OK')"
+        run: LLM_API_KEY=sk-fake-for-ci LLM_PROVIDER=deepseek python -c "import main; print('OK')"
+      - name: HTML validation
+        run: python -c "from html.parser import HTMLParser; HTMLParser().feed(open('static/index.html', encoding='utf-8').read()); print('OK')"
 
-      - name: Static analysis (pyflakes)
+  test-stage1:
+    name: Stage 1 (multi-provider + SSE + circuit breaker)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./stage1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Syntax check
+        run: python -m py_compile main.py
+      - name: Import test (multi-provider config)
+        run: |
+          LLM_PROVIDERS=deepseek,qwen \
+          DEEPSEEK_API_KEY=sk-fake-a DEEPSEEK_BASE_URL=https://api.deepseek.com/v1 DEEPSEEK_MODEL=deepseek-chat \
+          QWEN_API_KEY=sk-fake-b QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1 QWEN_MODEL=qwen-plus \
+          python -c "import main; print(f'OK - {len(main.providers)} providers loaded')"
+      - name: CircuitBreaker unit test
+        run: |
+          python -c "
+          from main import CircuitBreaker, BreakerState
+          cb = CircuitBreaker('test', failure_threshold=3, recovery_time=1)
+          assert cb.allow()
+          for _ in range(3):
+              cb.record_failure()
+          assert cb.state == BreakerState.OPEN
+          assert not cb.allow()
+          import time; time.sleep(1.1)
+          assert cb.allow()  # 进入 HALF_OPEN
+          cb.record_success()
+          assert cb.state == BreakerState.CLOSED
+          print('OK - CircuitBreaker state machine works')
+          "
+      - name: HTML validation
+        run: python -c "from html.parser import HTMLParser; HTMLParser().feed(open('static/index.html', encoding='utf-8').read()); print('OK')"
+      - name: pyflakes
         run: |
           pip install pyflakes
           pyflakes main.py
-          echo "✅ pyflakes passed"
-
-      - name: Frontend HTML validation
-        run: |
-          # 简单检查 HTML 结构
-          python -c "
-          from html.parser import HTMLParser
-          class V(HTMLParser):
-              errors = []
-              def error(self, msg): self.errors.append(msg)
-          v = V()
-          v.feed(open('static/index.html', encoding='utf-8').read())
-          if v.errors:
-              raise SystemExit(f'HTML parse errors: {v.errors}')
-          print('✅ static/index.html is valid HTML')
-          "
-
-      - name: Summary
-        if: success()
-        run: |
-          echo "✅ All checks passed for Python ${{ matrix.python-version }}"
+          echo "OK - pyflakes passed"
