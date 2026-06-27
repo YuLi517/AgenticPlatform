@@ -227,17 +227,31 @@ async function send() {
   const loadingEl = appendMsg('assistant', '<span class="typing"><span></span><span></span><span></span></span>', true);
 
   try {
-    const r = await fetch('/chat?' + new URLSearchParams({
-      message: msg,
-      session_id: sessionId || '',
-    }), { method: 'POST' });
+    const r = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: msg,
+        session_id: sessionId || '',
+      }),
+    });
 
     loadingEl.remove();
 
     if (!r.ok) {
       const err = await r.json();
-      const errType = err.detail?.error_type || 'unknown';
-      const errMsg = err.detail?.message || r.statusText;
+      // FastAPI 422 错误格式: {detail: [{loc, msg, type}]}
+      // 自定义错误格式: {detail: {error_type, message}}
+      let errType = 'unknown';
+      let errMsg = r.statusText;
+      if (Array.isArray(err.detail)) {
+        // 422 validation error
+        errType = 'validation_error';
+        errMsg = err.detail.map(e => `${e.loc?.join('.')}: ${e.msg}`).join('; ');
+      } else if (err.detail && typeof err.detail === 'object') {
+        errType = err.detail.error_type || 'unknown';
+        errMsg = err.detail.message || err.detail.error_msg || r.statusText;
+      }
       appendMsg('error', `❌ [${errType}] ${errMsg}`);
       return;
     }
