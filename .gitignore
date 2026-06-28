@@ -6,6 +6,10 @@ __pycache__/
 # 环境变量（绝不入仓）
 .env
 .env.local
+.env.*
+*.bak
+.env.bak
+.env.MiniMax
 
 # 虚拟环境
 venv/
