@@ -520,7 +520,7 @@ async function sendStream(msg, provider) {
             if (!reasoningEl) {
               reasoningEl = document.createElement('details');
               reasoningEl.className = 'reasoning-block thinking';
-              reasoningEl.open = true;  // 流式思考中默认展开
+              reasoningEl.open = false;  // 默认收起，用户主动点才展开
               reasoningEl.dataset.startTs = Date.now();
               const summary = document.createElement('summary');
               summary.textContent = '💭 思考过程（思考中…）';
