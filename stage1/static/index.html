@@ -6,140 +6,360 @@
 <title>VerticalAgent Stage 1 — 多 Provider 流式对话</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
   body {
     font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    background: #f5f7fa; height: 100vh; display: flex; flex-direction: column;
+    background: #f7f7f8; color: #202123; display: flex;
   }
-  header {
-    background: #1f4e79; color: #fff; padding: 12px 20px;
+
+  /* ============== 左侧栏 ============== */
+  aside#sidebar {
+    width: 260px; min-width: 260px;
+    background: #202123; color: #ececec;
+    display: flex; flex-direction: column;
+    border-right: 1px solid #2d2d2d;
+  }
+  aside #sidebar-header {
+    padding: 10px 12px;
+    border-bottom: 1px solid #2d2d2d;
+  }
+  aside #newSessionBtn {
+    width: 100%;
+    background: transparent;
+    color: #ececec;
+    border: 1px solid #4a4a4a;
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 8px;
+    transition: background 0.15s;
+  }
+  aside #newSessionBtn:hover { background: #2a2b2c; }
+  aside #newSessionBtn .icon { font-size: 14px; font-weight: bold; }
+  aside #newSessionBtn .text { flex: 1; text-align: left; }
+
+  aside #sessionList {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  aside #sessionList::-webkit-scrollbar { width: 6px; }
+  aside #sessionList::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 3px; }
+
+  .session-item {
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 2px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px;
+    transition: background 0.1s;
+    position: relative;
+  }
+  .session-item:hover { background: #2a2b2c; }
+  .session-item.active { background: #343541; }
+  .session-item .session-icon { font-size: 14px; opacity: 0.7; flex-shrink: 0; }
+  .session-item .session-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .session-item .delete-btn {
+    opacity: 0;
+    background: transparent;
+    border: none;
+    color: #999;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: opacity 0.1s, background 0.1s;
+  }
+  .session-item:hover .delete-btn { opacity: 0.8; }
+  .session-item .delete-btn:hover { background: #c53030; color: #fff; opacity: 1; }
+
+  aside #sidebar-footer {
+    padding: 10px 12px;
+    border-top: 1px solid #2d2d2d;
+    font-size: 11px;
+    color: #8e8ea0;
+    display: flex; align-items: center; gap: 8px;
+  }
+  aside #sidebar-footer .provider-info {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  aside #sidebar-footer .settings-btn {
+    background: transparent; border: none; color: #ececec;
+    cursor: pointer; padding: 4px; border-radius: 4px;
+  }
+  aside #sidebar-footer .settings-btn:hover { background: #2a2b2c; }
+
+  /* ============== 主区域 ============== */
+  main#main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  header#topbar {
+    height: 56px; padding: 0 20px;
+    background: #fff;
+    border-bottom: 1px solid #e5e5e5;
     display: flex; justify-content: space-between; align-items: center;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    flex-shrink: 0;
   }
-  header h1 { font-size: 16px; font-weight: 600; }
-  header .status { font-size: 12px; opacity: 0.85; margin-top: 2px; }
-  header .controls { display: flex; gap: 8px; align-items: center; }
-  header select, header button {
-    background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
-    color: #fff; padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+  header#topbar .title { font-size: 15px; font-weight: 600; }
+  header#topbar .controls { display: flex; gap: 8px; align-items: center; }
+  header#topbar select, header#topbar button {
+    background: #fff; color: #202123; border: 1px solid #d0d0d0;
+    padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;
   }
-  header select option { background: #1f4e79; color: #fff; }
-  header button:hover { background: rgba(255,255,255,0.25); }
-  main {
-    flex: 1; overflow-y: auto; padding: 20px;
-    max-width: 900px; width: 100%; margin: 0 auto;
+  header#topbar select option { background: #fff; color: #202123; }
+  header#topbar button:hover { background: #f7f7f8; }
+  header#topbar #streamBtn.active { background: #4caf50; color: #fff; border-color: #4caf50; }
+
+  /* 聊天区 */
+  #chat-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
   }
+  #chat-container::-webkit-scrollbar { width: 8px; }
+  #chat-container::-webkit-scrollbar-thumb { background: #d0d0d0; border-radius: 4px; }
   .msg { margin: 12px 0; display: flex; }
   .msg.user { justify-content: flex-end; }
   .msg .bubble {
-    max-width: 75%; padding: 10px 14px; border-radius: 10px;
+    max-width: 70%; padding: 12px 16px; border-radius: 12px;
     line-height: 1.6; word-wrap: break-word; white-space: pre-wrap;
+    font-size: 14px;
   }
-  .msg.user .bubble { background: #1f4e79; color: #fff; border-bottom-right-radius: 2px; }
-  .msg.assistant .bubble { background: #fff; color: #333; border: 1px solid #e0e0e0; border-bottom-left-radius: 2px; }
-  .msg.system .bubble { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; text-align: center; font-size: 13px; max-width: 90%; }
-  .msg.error .bubble { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-  .msg .meta { font-size: 11px; color: #888; margin-top: 4px; }
+  .msg.user .bubble { background: #1f4e79; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.assistant .bubble { background: #fff; color: #202123; border: 1px solid #e5e5e5; border-bottom-left-radius: 4px; }
+  .msg.system .bubble { background: #f0f0f0; color: #6e6e80; border: none; text-align: center; font-size: 13px; max-width: 90%; }
+  .msg.error .bubble { background: #fee; color: #c53030; border: 1px solid #fcc; }
+  .msg .meta { font-size: 11px; color: #8e8ea0; margin-top: 6px; }
   .msg.user .meta { text-align: right; }
-  .cursor { display: inline-block; width: 7px; height: 14px; background: #1f4e79; animation: blink 1s infinite; vertical-align: text-bottom; }
+
+  .cursor { display: inline-block; width: 8px; height: 16px; background: #1f4e79; animation: blink 1s infinite; vertical-align: text-bottom; }
   @keyframes blink { 50% { opacity: 0; } }
-  footer { background: #fff; border-top: 1px solid #e0e0e0; padding: 12px 20px; }
-  .input-area { max-width: 900px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; }
+
+  /* 输入区 */
+  footer#inputbar {
+    background: #fff; border-top: 1px solid #e5e5e5;
+    padding: 12px 20px 20px;
+    flex-shrink: 0;
+  }
+  .input-area {
+    max-width: 768px; margin: 0 auto;
+    display: flex; gap: 10px; align-items: flex-end;
+    border: 1px solid #d0d0d0; border-radius: 12px;
+    padding: 8px 8px 8px 14px;
+    transition: border-color 0.15s;
+  }
+  .input-area:focus-within { border-color: #1f4e79; }
   .input-area textarea {
-    flex: 1; border: 1px solid #d0d0d0; border-radius: 8px; padding: 10px 14px;
-    font-size: 14px; font-family: inherit; resize: none;
-    min-height: 44px; max-height: 200px; outline: none;
+    flex: 1; border: none; background: transparent;
+    padding: 8px 4px; font-size: 14px;
+    font-family: inherit; resize: none;
+    min-height: 24px; max-height: 200px; outline: none;
+    color: #202123;
   }
-  .input-area textarea:focus { border-color: #1f4e79; }
-  .input-area button {
-    background: #1f4e79; color: #fff; border: none; padding: 12px 24px;
-    border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; min-width: 80px;
+  .input-area #sendBtn {
+    background: #1f4e79; color: #fff; border: none;
+    padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    min-width: 70px; flex-shrink: 0;
   }
-  .input-area button:hover:not(:disabled) { background: #163d5e; }
-  .input-area button:disabled { background: #999; cursor: not-allowed; }
+  .input-area #sendBtn:hover:not(:disabled) { background: #163d5e; }
+  .input-area #sendBtn:disabled { background: #c0c0c0; cursor: not-allowed; }
+
   .provider-pill {
     display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px;
     background: #e3f2fd; color: #1565c0; margin-right: 4px;
   }
   .provider-pill.fallback { background: #fff3cd; color: #856404; }
-  .provider-pill.error { background: #f8d7da; color: #721c24; }
+
+  /* 移动端：折叠侧栏 */
+  @media (max-width: 768px) {
+    aside#sidebar { display: none; }
+  }
 </style>
 </head>
 <body>
 
-<header>
-  <div>
-    <h1>🤖 VerticalAgent Stage 1</h1>
-    <div class="status" id="status">就绪 · 多 Provider 流式对话</div>
+<!-- ========== 左侧栏 ========== -->
+<aside id="sidebar">
+  <div id="sidebar-header">
+    <button id="newSessionBtn">
+      <span class="icon">+</span>
+      <span class="text">新会话</span>
+    </button>
   </div>
-  <div class="controls">
-    <select id="providerSelect" title="选择 Provider">
-      <option value="">Auto (按优先级)</option>
-    </select>
-    <button id="streamBtn" onclick="toggleStream()" title="流式开关">📡 流式 ON</button>
-    <button onclick="newSession()">新会话</button>
+  <div id="sessionList"></div>
+  <div id="sidebar-footer">
+    <div class="provider-info" id="providerInfo">加载中…</div>
+    <button class="settings-btn" title="刷新会话列表" onclick="loadSessions()">↻</button>
   </div>
-</header>
+</aside>
 
-<main id="chat">
-  <div class="msg system">
-    <div class="bubble">
-      👋 阶段 1 Demo：多 Provider 路由 + SSE 流式响应 + 熔断器<br>
-      <small>输入消息，回车发送 · 可在右上角选 Provider · 流式模式下一个字一个字显示</small>
+<!-- ========== 主区域 ========== -->
+<main id="main">
+  <header id="topbar">
+    <div class="title" id="topbarTitle">🤖 VerticalAgent Stage 1</div>
+    <div class="controls">
+      <select id="providerSelect" title="选择 Provider"></select>
+      <button id="streamBtn" class="active" onclick="toggleStream()" title="流式开关">📡 流式</button>
+    </div>
+  </header>
+
+  <div id="chat-container">
+    <div class="msg system">
+      <div class="bubble">
+        👋 阶段 1 Demo：多 Provider 路由 + SSE 流式响应 + 熔断器<br>
+        <small>左侧栏可切换历史会话 · 右上角选 Provider · 流式/整段可切换</small>
+      </div>
     </div>
   </div>
+
+  <footer id="inputbar">
+    <div class="input-area">
+      <textarea id="input" placeholder="输入消息，回车发送，Shift+回车换行..." rows="1"></textarea>
+      <button id="sendBtn" onclick="send()">发送</button>
+    </div>
+  </footer>
 </main>
 
-<footer>
-  <div class="input-area">
-    <textarea id="input" placeholder="输入消息，回车发送，Shift+回车换行..." rows="1"></textarea>
-    <button id="sendBtn" onclick="send()">发送</button>
-  </div>
-</footer>
-
 <script>
-let sessionId = null;
+let currentSessionId = null;        // 当前正在对话的 session
 let isWaiting = false;
 let streamMode = true;
 
-const chatEl = document.getElementById('chat');
+const chatEl = document.getElementById('chat-container');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('sendBtn');
 const streamBtn = document.getElementById('streamBtn');
 const providerSelect = document.getElementById('providerSelect');
-const statusEl = document.getElementById('status');
+const sessionListEl = document.getElementById('sessionList');
+const topbarTitleEl = document.getElementById('topbarTitle');
+const providerInfoEl = document.getElementById('providerInfo');
+const newSessionBtn = document.getElementById('newSessionBtn');
 
-// 1. 加载 providers
-async function loadProviders() {
+// ============== 会话管理 ==============
+
+async function loadSessions() {
   try {
-    const r = await fetch('/v1/models');
+    const r = await fetch('/sessions');
     const d = await r.json();
-    d.providers.forEach(p => {
-      const opt = document.createElement('option');
-      opt.value = p.provider;
-      const state = p.state === 'closed' ? '✅' : (p.state === 'open' ? '🔴' : '🟡');
-      opt.textContent = `${state} ${p.provider} (${p.model})`;
-      providerSelect.appendChild(opt);
-    });
-    updateStatus();
+    renderSessionList(d.sessions);
   } catch (e) {
-    statusEl.textContent = '❌ 后端离线';
+    console.error('Failed to load sessions:', e);
   }
 }
 
-function updateStatus() {
-  fetch('/v1/models').then(r => r.json()).then(d => {
-    const summary = d.providers.map(p => {
-      const s = p.state === 'closed' ? '✅' : p.state === 'open' ? '🔴' : '🟡';
-      return `${s}${p.provider}`;
-    }).join(' | ');
-    statusEl.textContent = `就绪 · ${summary}`;
-  });
+function renderSessionList(sessions) {
+  sessionListEl.innerHTML = '';
+  if (!sessions || sessions.length === 0) {
+    sessionListEl.innerHTML = '<div style="padding: 20px; color: #8e8ea0; font-size: 12px; text-align: center;">还没有会话</div>';
+    return;
+  }
+  for (const s of sessions) {
+    const item = document.createElement('div');
+    item.className = 'session-item' + (s.session_id === currentSessionId ? ' active' : '');
+    item.dataset.sid = s.session_id;
+    item.innerHTML = `
+      <span class="session-icon">💬</span>
+      <span class="session-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</span>
+      <button class="delete-btn" title="删除会话">×</button>
+    `;
+    item.addEventListener('click', (e) => {
+      if (e.target.classList.contains('delete-btn')) {
+        e.stopPropagation();
+        deleteSession(s.session_id);
+        return;
+      }
+      switchSession(s.session_id);
+    });
+    sessionListEl.appendChild(item);
+  }
 }
+
+async function switchSession(sid) {
+  if (sid === currentSessionId) return;
+  if (isWaiting) {
+    if (!confirm('正在对话中，切换会丢失当前生成。确认切换？')) return;
+  }
+  currentSessionId = sid;
+  // 更新侧栏高亮
+  document.querySelectorAll('.session-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.sid === sid);
+  });
+  // 加载历史消息
+  await loadSessionHistory(sid);
+}
+
+async function loadSessionHistory(sid) {
+  try {
+    const r = await fetch(`/sessions/${sid}`);
+    if (!r.ok) {
+      chatEl.innerHTML = `<div class="msg error"><div class="bubble">❌ 会话不存在或已删除</div></div>`;
+      return;
+    }
+    const d = await r.json();
+    renderMessages(d.messages);
+  } catch (e) {
+    chatEl.innerHTML = `<div class="msg error"><div class="bubble">❌ 加载失败: ${e.message}</div></div>`;
+  }
+}
+
+function renderMessages(messages) {
+  chatEl.innerHTML = '';
+  if (!messages || messages.length === 0) {
+    chatEl.innerHTML = `<div class="msg system"><div class="bubble">空会话</div></div>`;
+    return;
+  }
+  for (const msg of messages) {
+    if (msg.role === 'user') {
+      appendMsg('user', msg.content, false, null);
+    } else if (msg.role === 'assistant') {
+      appendMsg('assistant', msg.content, false, null);
+    }
+    // system 消息跳过
+  }
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+async function newSession() {
+  // 立即创建空 session 并切换
+  currentSessionId = null;  // 让后端生成
+  chatEl.innerHTML = `<div class="msg system"><div class="bubble">🆕 新会话 — 发送消息开始对话</div></div>`;
+  // 更新侧栏（去掉高亮）
+  document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+  // 不需要立刻刷新列表，等用户发了第一条消息后才会真正创建
+}
+
+async function deleteSession(sid) {
+  if (!confirm('删除这个会话？此操作不可恢复。')) return;
+  try {
+    await fetch(`/sessions/${sid}`, { method: 'DELETE' });
+    if (sid === currentSessionId) {
+      currentSessionId = null;
+      chatEl.innerHTML = `<div class="msg system"><div class="bubble">🗑️ 会话已删除</div></div>`;
+    }
+    await loadSessions();
+  } catch (e) {
+    alert('删除失败: ' + e.message);
+  }
+}
+
+newSessionBtn.addEventListener('click', newSession);
+
+// ============== 发送消息 ==============
 
 function toggleStream() {
   streamMode = !streamMode;
-  streamBtn.textContent = streamMode ? '📡 流式 ON' : '📦 整段 ON';
-  streamBtn.style.background = streamMode ? 'rgba(76, 175, 80, 0.4)' : 'rgba(255,255,255,0.15)';
+  streamBtn.classList.toggle('active', streamMode);
+  streamBtn.textContent = streamMode ? '📡 流式' : '📦 整段';
 }
 
 async function send() {
@@ -147,17 +367,23 @@ async function send() {
   const msg = inputEl.value.trim();
   if (!msg) return;
 
-  const selectedProvider = providerSelect.value;
   appendMsg('user', msg);
   inputEl.value = '';
   inputEl.style.height = 'auto';
   setWaiting(true);
 
+  const selectedProvider = providerSelect.value;
   if (streamMode) {
     await sendStream(msg, selectedProvider);
   } else {
     await sendNonStream(msg, selectedProvider);
   }
+  // 发送后刷新侧栏（标题已更新）
+  await loadSessions();
+  // 重新高亮当前会话
+  document.querySelectorAll('.session-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.sid === currentSessionId);
+  });
 }
 
 async function sendStream(msg, provider) {
@@ -171,14 +397,23 @@ async function sendStream(msg, provider) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: msg,
-        session_id: sessionId,
+        session_id: currentSessionId,
         provider: provider || null,
       }),
     });
 
     if (!r.ok) {
       const err = await r.json();
-      bubble.innerHTML = `❌ [${err.detail?.error_type}] ${err.detail?.error_msg || r.statusText}`;
+      let errType = 'unknown';
+      let errMsg = r.statusText;
+      if (Array.isArray(err.detail)) {
+        errType = 'validation_error';
+        errMsg = err.detail.map(e => `${e.loc?.join('.')}: ${e.msg}`).join('; ');
+      } else if (err.detail && typeof err.detail === 'object') {
+        errType = err.detail.error_type || 'unknown';
+        errMsg = err.detail.message || err.detail.error_msg || r.statusText;
+      }
+      bubble.innerHTML = `❌ [${errType}] ${errMsg}`;
       bubble.parentElement.classList.add('error');
       return;
     }
@@ -194,11 +429,8 @@ async function sendStream(msg, provider) {
       const { value, done } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-
-      // 解析 SSE: event: xxx\ndata: {...}\n\n
       const events = buffer.split('\n\n');
       buffer = events.pop() || '';
-
       for (const ev of events) {
         const lines = ev.split('\n');
         let eventName = 'message';
@@ -208,11 +440,10 @@ async function sendStream(msg, provider) {
           else if (line.startsWith('data:')) dataLine += line.slice(5).trim();
         }
         if (!dataLine) continue;
-
         try {
           const data = JSON.parse(dataLine);
           if (eventName === 'start') {
-            sessionId = data.session_id;
+            currentSessionId = data.session_id;
             providerUsed = data.primary_provider;
           } else if (eventName === 'delta') {
             fullText += data.delta;
@@ -221,27 +452,21 @@ async function sendStream(msg, provider) {
             providerUsed = data.provider;
           } else if (eventName === 'done') {
             usage = data.usage || {};
-            if (data.provider && data.provider !== providerUsed) {
-              fallbackUsed = true;
-            }
+            if (data.provider && data.provider !== providerUsed) fallbackUsed = true;
             providerUsed = data.provider;
             bubble.innerHTML = escapeHtml(fullText);
-            const meta = assistantEl.querySelector('.meta') || (() => {
-              const m = document.createElement('div');
-              m.className = 'meta';
-              assistantEl.appendChild(m);
-              return m;
-            })();
+            const meta = document.createElement('div');
+            meta.className = 'meta';
             const pillClass = fallbackUsed ? 'provider-pill fallback' : 'provider-pill';
-            const fallbackTag = fallbackUsed ? '⚡fallback' : '';
-            meta.innerHTML = `<span class="${pillClass}">${providerUsed}</span>${fallbackTag} ` +
+            meta.innerHTML = `<span class="${pillClass}">${providerUsed}</span> ` +
                              `📊 ${usage.completion_tokens || 0} tokens · 🌊 SSE`;
+            assistantEl.appendChild(meta);
           } else if (eventName === 'error') {
             bubble.innerHTML = `❌ [${data.error_type}] ${data.error_msg}`;
             bubble.parentElement.classList.add('error');
           }
         } catch (e) {
-          console.error('SSE parse error:', e, dataLine);
+          console.error('SSE parse error:', e);
         }
       }
     }
@@ -259,7 +484,7 @@ async function sendNonStream(msg, provider) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: msg,
-        session_id: sessionId,
+        session_id: currentSessionId,
         provider: provider || null,
       }),
     });
@@ -267,19 +492,26 @@ async function sendNonStream(msg, provider) {
 
     if (!r.ok) {
       const err = await r.json();
-      appendMsg('error', `❌ [${err.detail?.error_type}] ${err.detail?.error_msg}`);
+      let errType = 'unknown';
+      let errMsg = r.statusText;
+      if (Array.isArray(err.detail)) {
+        errType = 'validation_error';
+        errMsg = err.detail.map(e => `${e.loc?.join('.')}: ${e.msg}`).join('; ');
+      } else if (err.detail && typeof err.detail === 'object') {
+        errType = err.detail.error_type || 'unknown';
+        errMsg = err.detail.message || err.detail.error_msg || r.statusText;
+      }
+      appendMsg('error', `❌ [${errType}] ${errMsg}`);
       return;
     }
 
     const data = await r.json();
-    sessionId = data.session_id;
-    const pillClass = data.fallback_used ? 'provider-pill fallback' : 'provider-pill';
-    const fallbackTag = data.fallback_used ? '⚡fallback' : '';
-    appendMsg('assistant', data.reply, false,
-      `<span class="${pillClass}">${data.provider}</span>${fallbackTag} ` +
-      `📊 ${data.usage.total_tokens} tokens (${data.usage.prompt_tokens}+${data.usage.completion_tokens}) · ` +
-      `⏱️ ${(data.latency_ms/1000).toFixed(2)}s · 📦 整段`
-    );
+    currentSessionId = data.session_id;
+    const meta = `<span class="provider-pill${data.fallback_used ? ' fallback' : ''}">${data.provider}</span> ` +
+                 `📊 ${data.usage.total_tokens} tokens · ⏱️ ${(data.latency_ms/1000).toFixed(2)}s · 📦 整段`;
+    // 替换 loading 元素
+    const realEl = appendMsg('assistant', data.reply, false, meta);
+    loadingEl.remove();
   } catch (e) {
     loadingEl.remove();
     appendMsg('error', `❌ 网络错误: ${e.message}`);
@@ -289,15 +521,9 @@ async function sendNonStream(msg, provider) {
   }
 }
 
-async function newSession() {
-  if (sessionId) {
-    try { await fetch(`/sessions/${sessionId}`, { method: 'DELETE' }); } catch (e) {}
-  }
-  sessionId = null;
-  chatEl.innerHTML = `<div class="msg system"><div class="bubble">🆕 新的会话开始了</div></div>`;
-}
+// ============== UI helpers ==============
 
-function appendMsg(role, text, isHtml = false, meta = '') {
+function appendMsg(role, text, isHtml = false, meta = null) {
   const div = document.createElement('div');
   div.className = `msg ${role}`;
   const bubble = document.createElement('div');
@@ -308,7 +534,7 @@ function appendMsg(role, text, isHtml = false, meta = '') {
   if (meta) {
     const m = document.createElement('div');
     m.className = 'meta';
-    m.innerHTML = meta;
+    if (typeof meta === 'string') m.innerHTML = meta;
     div.appendChild(m);
   }
   chatEl.appendChild(div);
@@ -318,7 +544,7 @@ function appendMsg(role, text, isHtml = false, meta = '') {
 
 function escapeHtml(s) {
   const map = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
-  return s.replace(/[&<>"']/g, c => map[c]);
+  return String(s).replace(/[&<>"']/g, c => map[c]);
 }
 
 function setWaiting(waiting) {
@@ -327,6 +553,42 @@ function setWaiting(waiting) {
   sendBtn.textContent = waiting ? '...' : '发送';
   inputEl.disabled = waiting;
 }
+
+function updateTopbarTitle() {
+  if (currentSessionId) {
+    topbarTitleEl.textContent = '🤖 VerticalAgent Stage 1 · 当前会话';
+  } else {
+    topbarTitleEl.textContent = '🤖 VerticalAgent Stage 1';
+  }
+}
+
+// ============== Providers ==============
+
+async function loadProviders() {
+  try {
+    const r = await fetch('/v1/models');
+    const d = await r.json();
+    providerSelect.innerHTML = '<option value="">Auto</option>';
+    d.providers.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.provider;
+      const icon = p.state === 'closed' ? '✅' : p.state === 'open' ? '🔴' : '🟡';
+      opt.textContent = `${icon} ${p.provider}`;
+      providerSelect.appendChild(opt);
+    });
+    // 更新侧栏底部信息
+    const summary = d.providers.map(p => {
+      const icon = p.state === 'closed' ? '🟢' : p.state === 'open' ? '🔴' : '🟡';
+      return `${icon}${p.provider}`;
+    }).join(' · ');
+    providerInfoEl.textContent = summary || '无 Provider';
+    providerInfoEl.title = summary;
+  } catch (e) {
+    providerInfoEl.textContent = '❌ 后端离线';
+  }
+}
+
+// ============== 事件 ==============
 
 inputEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -339,8 +601,26 @@ inputEl.addEventListener('input', () => {
   inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
 });
 
-loadProviders();
-setInterval(updateStatus, 30000);
+// 监听 currentSessionId 变化更新标题
+const _origSwitch = switchSession;
+const _origNew = newSession;
+
+// ============== 启动 ==============
+
+(async function init() {
+  await loadProviders();
+  await loadSessions();
+  // 默认选择最新的会话（如果有）
+  const items = document.querySelectorAll('.session-item');
+  if (items.length > 0 && !currentSessionId) {
+    const firstSid = items[0].dataset.sid;
+    await switchSession(firstSid);
+  }
+  updateTopbarTitle();
+})();
+
+setInterval(loadProviders, 30000);
+setInterval(() => { if (!isWaiting) loadSessions(); }, 10000);
 </script>
 
 </body>

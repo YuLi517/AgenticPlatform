@@ -636,7 +636,27 @@ def clear_session(sid: str):
 
 @app.get("/sessions")
 def list_sessions():
-    return {"count": len(sessions.list_sessions()), "sessions": sessions.list_sessions()}
+    """列出所有 session，附带首条 user 消息作为标题预览"""
+    result = []
+    for meta in sessions.list_sessions():
+        sid = meta["session_id"]
+        history = sessions.get_history(sid)
+        # 取首条 user 消息作为标题
+        title = "新会话"
+        for msg in history:
+            if msg.get("role") == "user":
+                content = msg.get("content", "").strip()
+                if content:
+                    title = content[:30] + ("…" if len(content) > 30 else "")
+                break
+        result.append({
+            **meta,
+            "title": title,
+            "message_count": len(history),
+        })
+    # 按创建时间倒序
+    result.sort(key=lambda s: s.get("created_at", 0), reverse=True)
+    return {"count": len(result), "sessions": result}
 
 
 # ============== 启动 ==============
