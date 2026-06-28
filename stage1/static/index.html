@@ -147,8 +147,8 @@
   .msg.assistant { flex-direction: column; align-items: flex-start; }
   .msg.system .bubble { background: #f0f0f0; color: #6e6e80; border: none; text-align: center; font-size: 13px; max-width: 90%; }
   .msg.error .bubble { background: #fee; color: #c53030; border: 1px solid #fcc; }
-  .msg .meta { font-size: 11px; color: #8e8ea0; margin-top: 6px; }
-  .msg.user .meta { text-align: right; }
+  .msg .meta { font-size: 11px; color: #8e8ea0; margin-top: 0; padding-top: 6px; border-top: 1px dashed #ececf1; }
+  .msg.user .meta { text-align: right; border-top: none; padding-top: 0; margin-top: 4px; }
 
   .cursor { display: inline-block; width: 8px; height: 16px; background: #1f4e79; animation: blink 1s infinite; vertical-align: text-bottom; }
   @keyframes blink { 50% { opacity: 0; } }
@@ -584,14 +584,18 @@ async function sendStream(msg, provider) {
               }
               reasoningEl.classList.remove('thinking');
             }
-            // meta 行
+            // meta 行（移进 bubble 内部，避免外部 padding+margin 双重空行）
             const meta = document.createElement('div');
             meta.className = 'meta';
             const pillClass = fallbackUsed ? 'provider-pill fallback' : 'provider-pill';
             meta.innerHTML = `<span class="${pillClass}">${providerUsed}</span> ` +
                              `📊 ${usage.completion_tokens || 0} tokens · 🌊 SSE` +
                              (fullReasoning ? ` · 💭 ${fullReasoning.length} 字思考` : '');
-            assistantEl.appendChild(meta);
+            if (bubble) {
+              bubble.appendChild(meta);
+            } else {
+              assistantEl.appendChild(meta);
+            }
           } else if (eventName === 'error') {
             // 错误：直接显示
             const errEl = document.createElement('div');
