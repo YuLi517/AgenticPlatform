@@ -278,45 +278,86 @@ class LLMProvider:
             self.breaker.record_success()
             full_reply = ""
             full_reasoning = ""  # 累积思考过程
+            content_buffer = ""  # 用于检测跨 chunk 的 <think>...</think>
             completion_tokens = 0
+
+            def emit_text(text):
+                """辅助函数：发 content_delta"""
+                nonlocal full_reply, completion_tokens
+                if not text:
+                    return
+                full_reply += text
+                completion_tokens += 1
+                return {
+                    "ok": True,
+                    "is_final": False,
+                    "event": "content_delta",
+                    "delta": text,
+                    "provider": self.config.name,
+                    "model": self.config.model,
+                }
+
+            def emit_reasoning(text):
+                """辅助函数：发 reasoning_delta"""
+                nonlocal full_reasoning
+                if not text:
+                    return
+                full_reasoning += text
+                return {
+                    "ok": True,
+                    "is_final": False,
+                    "event": "reasoning_delta",
+                    "delta": text,
+                    "provider": self.config.name,
+                    "model": self.config.model,
+                }
+
             for chunk in stream:
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
 
-                # 兼容 OpenAI SDK 1.x：用 model_dump 取所有字段（含 reasoning_content）
+                # 兼容 OpenAI SDK 1.x：先尝试独立的 reasoning_content 字段（DeepSeek-R1 / o1 风格）
                 delta_dict = {}
                 try:
                     delta_dict = delta.model_dump(exclude_unset=False)
                 except Exception:
                     pass
 
-                # 1) 提取 reasoning_content（DeepSeek-R1 / MiniMax-M2 / o1 等思维模型）
-                reasoning = delta_dict.get("reasoning_content") or ""
-                if reasoning:
-                    full_reasoning += reasoning
-                    yield {
-                        "ok": True,
-                        "is_final": False,
-                        "event": "reasoning_delta",  # SSE event 类型
-                        "delta": reasoning,
-                        "provider": self.config.name,
-                        "model": self.config.model,
-                    }
+                standalone_reasoning = delta_dict.get("reasoning_content") or ""
 
-                # 2) 提取 content（正常回答内容）
+                # 2) 处理 content（可能在 <think>...</think> 内）
                 content = delta.content or ""
+
+                # 如果有独立的 reasoning_content 字段，先发它
+                if standalone_reasoning:
+                    yield emit_reasoning(standalone_reasoning)
+
+                # 把 content 加入 buffer，循环抽离 <think>...</think>
                 if content:
-                    full_reply += content
-                    completion_tokens += 1
-                    yield {
-                        "ok": True,
-                        "is_final": False,
-                        "event": "content_delta",
-                        "delta": content,
-                        "provider": self.config.name,
-                        "model": self.config.model,
-                    }
+                    content_buffer += content
+                    # 处理 buffer 中所有完整的 <think>...</think>
+                    while True:
+                        ts = content_buffer.find("<think>")
+                        if ts == -1:
+                            break  # 没有 think 开始标签
+                        te = content_buffer.find("</think>", ts)
+                        if te == -1:
+                            break  # 还没结束标签，等下个 chunk
+                        # 抽取
+                        before = content_buffer[:ts]
+                        thinking = content_buffer[ts + len("<think>") : te]
+                        after = content_buffer[te + len("</think>") :]
+                        # 输出
+                        if before:
+                            yield emit_text(before)
+                        if thinking:
+                            yield emit_reasoning(thinking)
+                        content_buffer = after
+
+            # 流结束时，buffer 里残留的（可能是 <think> 没闭合的尾巴）作为 content 输出
+            if content_buffer:
+                yield emit_text(content_buffer)
 
             yield {
                 "ok": True,
