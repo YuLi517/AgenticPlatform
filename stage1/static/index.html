@@ -526,18 +526,17 @@ async function sendStream(msg, provider) {
             currentSessionId = data.session_id;
             providerUsed = data.primary_provider;
           } else if (eventName === 'reasoning_delta') {
-            // 思考过程：累积到折叠区
+            // 思考过程：累积到折叠区（懒加载：首次才创建 details）
             fullReasoning += data.delta;
             if (!reasoningEl) {
               reasoningEl = document.createElement('details');
               reasoningEl.className = 'reasoning-block thinking';
-              reasoningEl.open = false;  // 默认收起，用户主动点才展开
+              reasoningEl.open = false;
               reasoningEl.dataset.startTs = Date.now();
               const summary = document.createElement('summary');
               summary.textContent = '💭 思考过程（思考中…）';
               reasoningContentEl = document.createElement('div');
               reasoningContentEl.className = 'reasoning-content';
-              reasoningContentEl.textContent = '';
               reasoningEl.appendChild(summary);
               reasoningEl.appendChild(reasoningContentEl);
               // 监听用户是否主动展开
@@ -545,28 +544,24 @@ async function sendStream(msg, provider) {
                 if (reasoningEl.open) userExpandedReasoning = true;
               });
               assistantEl.appendChild(reasoningEl);
-              // 同时创建内容气泡（带 cursor，placeholder 状态不显示 padding）
-              bubble = document.createElement('div');
-              bubble.className = 'bubble placeholder';
-              bubble.innerHTML = '<span class="cursor"></span>';
-              assistantEl.appendChild(bubble);
             }
+            // 把累积的 reasoning 写入（首次写入前不是空字符串）
             reasoningContentEl.textContent = fullReasoning;
             providerUsed = data.provider;
             chatEl.scrollTop = chatEl.scrollHeight;
           } else if (eventName === 'content_delta') {
-            // 正常内容：累积到 bubble
+            // 正常内容：累积到 bubble（懒加载：首次才创建 bubble）
             fullText += data.delta;
             if (!bubble) {
-              // 没有 reasoning 的模型，直接创建 bubble
+              // 直接创建带内容的 bubble，不创建 cursor 占位
               bubble = document.createElement('div');
-              bubble.className = 'bubble placeholder';
-              bubble.innerHTML = '<span class="cursor"></span>';
+              bubble.className = 'bubble';
+              bubble.innerHTML = escapeHtml(fullText);  // 第一次就有真实内容
               assistantEl.appendChild(bubble);
+            } else {
+              // 后续追加 + cursor
+              bubble.innerHTML = escapeHtml(fullText) + '<span class="cursor"></span>';
             }
-            // 移除 placeholder 类（恢复 padding 和边框）
-            bubble.classList.remove('placeholder');
-            bubble.innerHTML = escapeHtml(fullText) + '<span class="cursor"></span>';
             // 折叠思考区（如果用户没主动展开过）
             if (reasoningEl && !userExpandedReasoning) {
               reasoningEl.open = false;
