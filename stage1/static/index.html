@@ -128,11 +128,11 @@
   }
   #chat-container::-webkit-scrollbar { width: 8px; }
   #chat-container::-webkit-scrollbar-thumb { background: #d0d0d0; border-radius: 4px; }
-  .msg { margin: 12px 0; display: flex; }
+  .msg { margin: 6px 0; display: flex; }
   .msg.user { justify-content: flex-end; }
   .msg .bubble {
-    max-width: 70%; padding: 12px 16px; border-radius: 12px;
-    line-height: 1.6; word-wrap: break-word; white-space: pre-wrap;
+    max-width: 70%; padding: 10px 14px; border-radius: 12px;
+    line-height: 1.55; word-wrap: break-word; white-space: pre-wrap;
     font-size: 14px;
   }
   .msg.user .bubble { background: #1f4e79; color: #fff; border-bottom-right-radius: 4px; }
@@ -143,12 +143,20 @@
     border: none;
     background: transparent;
   }
-  /* assistant 内可能含折叠区 + bubble，需要纵向堆叠 */
-  .msg.assistant { flex-direction: column; align-items: flex-start; }
+  /* assistant 内可能含折叠区 + bubble + meta，纵向堆叠，紧密贴齐 */
+  .msg.assistant { flex-direction: column; align-items: flex-start; gap: 4px; }
   .msg.system .bubble { background: #f0f0f0; color: #6e6e80; border: none; text-align: center; font-size: 13px; max-width: 90%; }
   .msg.error .bubble { background: #fee; color: #c53030; border: 1px solid #fcc; }
-  .msg .meta { font-size: 11px; color: #8e8ea0; margin-top: 0; padding-top: 6px; border-top: 1px dashed #ececf1; }
-  .msg.user .meta { text-align: right; border-top: none; padding-top: 0; margin-top: 4px; }
+  /* meta 是 bubble 的 sibling（不是子元素），简洁无 padding/border */
+  .msg .meta {
+    font-size: 11px; color: #8e8ea0;
+    margin-top: 2px;
+    padding: 0;
+    border: none;
+    max-width: 70%;
+    align-self: flex-start;
+  }
+  .msg.user .meta { text-align: right; align-self: flex-end; }
 
   .cursor { display: inline-block; width: 8px; height: 16px; background: #1f4e79; animation: blink 1s infinite; vertical-align: text-bottom; }
   @keyframes blink { 50% { opacity: 0; } }
@@ -190,7 +198,7 @@
 
   /* 思考过程折叠区（仿 ChatGPT o1 / DeepSeek-R1） */
   details.reasoning-block {
-    margin-bottom: 8px;
+    margin-bottom: 0;
     background: #fafafa;
     border: 1px solid #e5e5e5;
     border-radius: 8px;
@@ -584,18 +592,14 @@ async function sendStream(msg, provider) {
               }
               reasoningEl.classList.remove('thinking');
             }
-            // meta 行（移进 bubble 内部，避免外部 padding+margin 双重空行）
+            // meta 行：放在 assistantEl 里（和 bubble 平级），不再塞进 bubble
             const meta = document.createElement('div');
             meta.className = 'meta';
             const pillClass = fallbackUsed ? 'provider-pill fallback' : 'provider-pill';
             meta.innerHTML = `<span class="${pillClass}">${providerUsed}</span> ` +
                              `📊 ${usage.completion_tokens || 0} tokens · 🌊 SSE` +
                              (fullReasoning ? ` · 💭 ${fullReasoning.length} 字思考` : '');
-            if (bubble) {
-              bubble.appendChild(meta);
-            } else {
-              assistantEl.appendChild(meta);
-            }
+            assistantEl.appendChild(meta);
           } else if (eventName === 'error') {
             // 错误：直接显示
             const errEl = document.createElement('div');
