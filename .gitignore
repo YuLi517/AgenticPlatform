@@ -29,3 +29,10 @@ venv/
 # 系统
 .DS_Store
 Thumbs.db
+
+# Stage 2 数据（SQLite DB 文件 + 备份）
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

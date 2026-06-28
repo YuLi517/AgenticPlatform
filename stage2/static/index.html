@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VerticalAgent Stage 1 — 多 Provider 流式对话</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f7f7f8; color: #202123; display: flex;
+  }
+
+  /* ============== 左侧栏 ============== */
+  aside#sidebar {
+    width: 260px; min-width: 260px;
+    background: #202123; color: #ececec;
+    display: flex; flex-direction: column;
+    border-right: 1px solid #2d2d2d;
+  }
+  aside #sidebar-header {
+    padding: 10px 12px;
+    border-bottom: 1px solid #2d2d2d;
+  }
+  aside #newSessionBtn {
+    width: 100%;
+    background: transparent;
+    color: #ececec;
+    border: 1px solid #4a4a4a;
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 8px;
+    transition: background 0.15s;
+  }
+  aside #newSessionBtn:hover { background: #2a2b2c; }
+  aside #newSessionBtn .icon { font-size: 14px; font-weight: bold; }
+  aside #newSessionBtn .text { flex: 1; text-align: left; }
+
+  aside #sessionList {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  aside #sessionList::-webkit-scrollbar { width: 6px; }
+  aside #sessionList::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 3px; }
+
+  /* Stage 2 新增：会话搜索框 */
+  #session-search-wrap {
+    position: relative;
+    padding: 8px 12px;
+    border-bottom: 1px solid #2d2d2d;
+  }
+  #sessionSearch {
+    width: 100%;
+    background: #2a2b2c;
+    border: 1px solid #4a4a4a;
+    color: #ececec;
+    padding: 7px 28px 7px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  #sessionSearch::placeholder { color: #6e6e80; }
+  #sessionSearch:focus { border-color: #1f4e79; }
+  #searchClearBtn {
+    position: absolute;
+    right: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    color: #8e8ea0;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  #searchClearBtn:hover { background: #4a4a4a; color: #fff; }
+
+  /* Stage 2 新增：加载更多按钮 */
+  #loadMoreWrap {
+    padding: 4px 12px 8px;
+  }
+  #loadMoreBtn {
+    width: 100%;
+    background: transparent;
+    color: #8e8ea0;
+    border: 1px dashed #4a4a4a;
+    border-radius: 6px;
+    padding: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  #loadMoreBtn:hover {
+    background: #2a2b2c;
+    color: #ececec;
+    border-color: #6e6e80;
+  }
+  /* 搜索结果摘要 */
+  #searchSummary {
+    padding: 4px 14px;
+    font-size: 11px;
+    color: #8e8ea0;
+    border-bottom: 1px solid #2d2d2d;
+    display: none;
+  }
+
+  .session-item {
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 2px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px;
+    transition: background 0.1s;
+    position: relative;
+  }
+  .session-item:hover { background: #2a2b2c; }
+  .session-item.active { background: #343541; }
+  .session-item .session-icon { font-size: 14px; opacity: 0.7; flex-shrink: 0; }
+  .session-item .session-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .session-item .delete-btn {
+    opacity: 0;
+    background: transparent;
+    border: none;
+    color: #999;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: opacity 0.1s, background 0.1s;
+  }
+  .session-item:hover .delete-btn { opacity: 0.8; }
+  .session-item .delete-btn:hover { background: #c53030; color: #fff; opacity: 1; }
+
+  aside #sidebar-footer {
+    padding: 10px 12px;
+    border-top: 1px solid #2d2d2d;
+    font-size: 11px;
+    color: #8e8ea0;
+    display: flex; align-items: center; gap: 8px;
+  }
+  aside #sidebar-footer .provider-info {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  aside #sidebar-footer .settings-btn {
+    background: transparent; border: none; color: #ececec;
+    cursor: pointer; padding: 4px; border-radius: 4px;
+  }
+  aside #sidebar-footer .settings-btn:hover { background: #2a2b2c; }
+
+  /* ============== 主区域 ============== */
+  main#main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  header#topbar {
+    height: 56px; padding: 0 20px;
+    background: #fff;
+    border-bottom: 1px solid #e5e5e5;
+    display: flex; justify-content: space-between; align-items: center;
+    flex-shrink: 0;
+  }
+  header#topbar .title { font-size: 15px; font-weight: 600; }
+  header#topbar .controls { display: flex; gap: 8px; align-items: center; }
+  header#topbar select, header#topbar button {
+    background: #fff; color: #202123; border: 1px solid #d0d0d0;
+    padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;
+  }
+  header#topbar select option { background: #fff; color: #202123; }
+  header#topbar button:hover { background: #f7f7f8; }
+  /* 流式按钮已删除，保留空位避免后续报错 */
+
+  /* 聊天区 */
+  #chat-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+  #chat-container::-webkit-scrollbar { width: 8px; }
+  #chat-container::-webkit-scrollbar-thumb { background: #d0d0d0; border-radius: 4px; }
+  .msg { margin: 6px 0; display: flex; }
+  .msg.user { justify-content: flex-end; }
+  .msg .bubble {
+    max-width: 70%; padding: 10px 14px; border-radius: 12px;
+    line-height: 1.55; word-wrap: break-word; white-space: pre-wrap;
+    font-size: 14px;
+  }
+  .msg.user .bubble { background: #1f4e79; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.assistant .bubble { background: #fff; color: #202123; border: 1px solid #e5e5e5; border-bottom-left-radius: 4px; }
+  /* bubble-wrap：包裹 bubble + 复制按钮，作为相对定位容器 */
+  .msg.assistant .bubble-wrap {
+    position: relative;
+    max-width: 70%;
+    display: block;
+  }
+  /* 复制按钮：默认隐藏，hover bubble-wrap 时显示 */
+  .msg.assistant .bubble-wrap .copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(255, 255, 255, 0.85);
+    color: #6e6e80;
+    border: 1px solid #e5e5e5;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s;
+    backdrop-filter: blur(4px);
+    line-height: 1.4;
+  }
+  .msg.assistant .bubble-wrap:hover .copy-btn { opacity: 1; }
+  .msg.assistant .bubble-wrap .copy-btn:hover {
+    background: #1f4e79;
+    color: #fff;
+    border-color: #1f4e79;
+  }
+  .msg.assistant .bubble-wrap .copy-btn.copied {
+    background: #d4edda;
+    color: #155724;
+    border-color: #c3e6cb;
+    opacity: 1;
+  }
+  /* 空 bubble（仅 cursor 占位）：消除 padding 和边框，不占视觉空间 */
+  .msg.assistant .bubble.placeholder {
+    padding: 0;
+    border: none;
+    background: transparent;
+  }
+  /* assistant 内可能含折叠区 + bubble + meta，纵向堆叠，紧密贴齐 */
+  .msg.assistant { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .msg.system .bubble { background: #f0f0f0; color: #6e6e80; border: none; text-align: center; font-size: 13px; max-width: 90%; }
+  .msg.error .bubble { background: #fee; color: #c53030; border: 1px solid #fcc; }
+  /* meta 是 bubble 的 sibling（不是子元素），简洁无 padding/border */
+  .msg .meta {
+    font-size: 11px; color: #8e8ea0;
+    margin-top: 2px;
+    padding: 0;
+    border: none;
+    max-width: 70%;
+    align-self: flex-start;
+  }
+  .msg.user .meta { text-align: right; align-self: flex-end; }
+
+  .cursor { display: inline-block; width: 8px; height: 16px; background: #1f4e79; animation: blink 1s infinite; vertical-align: text-bottom; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* 输入区 */
+  footer#inputbar {
+    background: #fff; border-top: 1px solid #e5e5e5;
+    padding: 12px 20px 20px;
+    flex-shrink: 0;
+  }
+  .input-area {
+    max-width: 768px; margin: 0 auto;
+    display: flex; gap: 10px; align-items: flex-end;
+    border: 1px solid #d0d0d0; border-radius: 12px;
+    padding: 8px 8px 8px 14px;
+    transition: border-color 0.15s;
+  }
+  .input-area:focus-within { border-color: #1f4e79; }
+  .input-area textarea {
+    flex: 1; border: none; background: transparent;
+    padding: 8px 4px; font-size: 14px;
+    font-family: inherit; resize: none;
+    min-height: 24px; max-height: 200px; outline: none;
+    color: #202123;
+  }
+  .input-area #sendBtn {
+    background: #1f4e79; color: #fff; border: none;
+    padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    min-width: 70px; flex-shrink: 0;
+  }
+  .input-area #sendBtn:hover:not(:disabled) { background: #163d5e; }
+  .input-area #sendBtn:disabled { background: #c0c0c0; cursor: not-allowed; }
+
+  .provider-pill {
+    display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px;
+    background: #e3f2fd; color: #1565c0; margin-right: 4px;
+  }
+  .provider-pill.fallback { background: #fff3cd; color: #856404; }
+
+  /* 思考过程折叠区（仿 ChatGPT o1 / DeepSeek-R1） */
+  details.reasoning-block {
+    margin-bottom: 0;
+    background: #fafafa;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    font-size: 13px;
+    overflow: hidden;
+    max-width: 70%;
+  }
+  details.reasoning-block summary {
+    padding: 6px 10px;
+    cursor: pointer;
+    user-select: none;
+    font-weight: 500;
+    color: #6e6e80;
+    background: #ececf1;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+  }
+  details.reasoning-block summary::-webkit-details-marker { display: none; }
+  details.reasoning-block summary::before {
+    content: '▶';
+    margin-right: 6px;
+    font-size: 10px;
+    transition: transform 0.2s;
+    display: inline-block;
+  }
+  details.reasoning-block[open] summary::before {
+    transform: rotate(90deg);
+  }
+  details.reasoning-block[open] summary {
+    border-bottom: 1px solid #e5e5e5;
+  }
+  details.reasoning-block .reasoning-content {
+    padding: 10px 12px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: #6e6e80;
+    font-family: ui-monospace, 'Cascadia Mono', 'Consolas', 'Monaco', monospace;
+    font-size: 11.5px;
+    line-height: 1.6;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  /* reasoning 内容为空时不占 padding 高度 */
+  details.reasoning-block .reasoning-content:empty {
+    padding: 0;
+    min-height: 0;
+  }
+  details.reasoning-block.thinking {
+    /* 流式思考中：左侧加个动效 */
+    border-left: 3px solid #1f4e79;
+  }
+
+  /* 移动端：折叠侧栏 */
+  @media (max-width: 768px) {
+    aside#sidebar { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ========== 左侧栏 ========== -->
+<aside id="sidebar">
+  <div id="sidebar-header">
+    <button id="newSessionBtn">
+      <span class="icon">+</span>
+      <span class="text">新会话</span>
+    </button>
+  </div>
+  <!-- Stage 2 新增：会话搜索框 -->
+  <div id="session-search-wrap">
+    <input
+      type="text"
+      id="sessionSearch"
+      placeholder="🔍 搜索会话（标题或消息内容）"
+      autocomplete="off"
+      spellcheck="false"
+    />
+    <button id="searchClearBtn" title="清空" style="display:none;">×</button>
+  </div>
+  <div id="sessionList"></div>
+  <!-- Stage 2 新增：加载更多按钮 -->
+  <div id="loadMoreWrap">
+    <button id="loadMoreBtn" style="display:none;">加载更多 ↓</button>
+  </div>
+  <div id="sidebar-footer">
+    <div class="provider-info" id="providerInfo">加载中…</div>
+    <button class="settings-btn" title="刷新会话列表" onclick="loadSessions(true)">↻</button>
+  </div>
+</aside>
+
+<!-- ========== 主区域 ========== -->
+<main id="main">
+  <header id="topbar">
+    <div class="title" id="topbarTitle">🤖 VerticalAgent Stage 1</div>
+    <div class="controls">
+      <select id="providerSelect" title="选择 Provider"></select>
+      <!-- 流式模式是唯一模式，UI 上不再提供切换 -->
+    </div>
+  </header>
+
+  <div id="chat-container">
+    <div class="msg system">
+      <div class="bubble">
+        👋 阶段 1 Demo：多 Provider 路由 + SSE 流式响应 + 熔断器<br>
+        <small>左侧栏可切换历史会话 · 右上角选 Provider · 流式输出（SSE）</small>
+      </div>
+    </div>
+  </div>
+
+  <footer id="inputbar">
+    <div class="input-area">
+      <textarea id="input" placeholder="输入消息，回车发送，Shift+回车换行..." rows="1"></textarea>
+      <button id="sendBtn" onclick="send()">发送</button>
+    </div>
+  </footer>
+</main>
+
+<script>
+let currentSessionId = null;        // 当前正在对话的 session
+let isWaiting = false;
+
+const chatEl = document.getElementById('chat-container');
+const inputEl = document.getElementById('input');
+const sendBtn = document.getElementById('sendBtn');
+const providerSelect = document.getElementById('providerSelect');
+const sessionListEl = document.getElementById('sessionList');
+const topbarTitleEl = document.getElementById('topbarTitle');
+const providerInfoEl = document.getElementById('providerInfo');
+const newSessionBtn = document.getElementById('newSessionBtn');
+
+// ============== 会话管理（Stage 2：搜索 + 翻页） ==============
+
+// 分页 / 搜索状态
+let sessionPage = 1;
+let sessionPageSize = 20;
+let sessionTotal = 0;
+let sessionQuery = '';
+let sessionLoading = false;
+
+async function loadSessions(reset = false) {
+  if (reset) {
+    sessionPage = 1;
+    sessionListEl.innerHTML = '';
+  }
+  if (sessionLoading) return;
+  sessionLoading = true;
+  try {
+    const params = new URLSearchParams({
+      page: String(sessionPage),
+      page_size: String(sessionPageSize),
+    });
+    if (sessionQuery) params.set('q', sessionQuery);
+    const r = await fetch(`/sessions?${params.toString()}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    sessionTotal = d.total;
+    renderSessionList(d.sessions, reset);
+    updateLoadMoreButton();
+    updateSearchSummary();
+  } catch (e) {
+    console.error('Failed to load sessions:', e);
+    if (reset) {
+      sessionListEl.innerHTML = `<div style="padding: 20px; color: #c53030; font-size: 12px; text-align: center;">❌ 加载失败：${escapeHtml(e.message)}</div>`;
+    }
+  } finally {
+    sessionLoading = false;
+  }
+}
+
+function renderSessionList(sessions, reset) {
+  if (reset) sessionListEl.innerHTML = '';
+  if (reset && (!sessions || sessions.length === 0)) {
+    sessionListEl.innerHTML = `<div style="padding: 20px; color: #8e8ea0; font-size: 12px; text-align: center;">${sessionQuery ? '🔍 没有匹配的会话' : '还没有会话'}</div>`;
+    return;
+  }
+  for (const s of sessions) {
+    const item = document.createElement('div');
+    item.className = 'session-item' + (s.session_id === currentSessionId ? ' active' : '');
+    item.dataset.sid = s.session_id;
+    // 标题 + 元信息（消息数 / token）
+    const meta = `${s.message_count} 条 · ${formatTimeAgo(s.updated_at)}`;
+    item.innerHTML = `
+      <span class="session-icon">💬</span>
+      <span class="session-title-block" style="flex:1; min-width:0; overflow:hidden;">
+        <span class="session-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</span>
+        <span class="session-meta" style="display:block; font-size:10px; color:#6e6e80; margin-top:1px;">${meta}</span>
+      </span>
+      <button class="delete-btn" title="删除会话">×</button>
+    `;
+    item.addEventListener('click', (e) => {
+      if (e.target.classList.contains('delete-btn')) {
+        e.stopPropagation();
+        deleteSession(s.session_id);
+        return;
+      }
+      switchSession(s.session_id);
+    });
+    sessionListEl.appendChild(item);
+  }
+}
+
+function updateLoadMoreButton() {
+  const btn = document.getElementById('loadMoreBtn');
+  const loadedCount = sessionPage * sessionPageSize;
+  if (loadedCount < sessionTotal) {
+    btn.style.display = 'block';
+    btn.textContent = `加载更多（${loadedCount}/${sessionTotal}）`;
+    btn.disabled = false;
+  } else if (sessionTotal > 0) {
+    btn.style.display = 'block';
+    btn.textContent = `已显示全部 ${sessionTotal} 个会话`;
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+function updateSearchSummary() {
+  let summary = document.getElementById('searchSummary');
+  if (!summary) {
+    summary = document.createElement('div');
+    summary.id = 'searchSummary';
+    document.getElementById('session-search-wrap').after(summary);
+  }
+  if (sessionQuery) {
+    summary.style.display = 'block';
+    summary.textContent = `🔍 "${sessionQuery}" — 命中 ${sessionTotal} 个会话`;
+  } else {
+    summary.style.display = 'none';
+  }
+}
+
+function formatTimeAgo(ts) {
+  if (!ts) return '';
+  const diff = Date.now() / 1000 - ts;
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} 天前`;
+  const d = new Date(ts * 1000);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+async function loadMoreSessions() {
+  if (sessionLoading) return;
+  sessionPage += 1;
+  await loadSessions(false);
+}
+
+// 搜索框防抖
+let searchDebounceTimer = null;
+function onSearchInput() {
+  const input = document.getElementById('sessionSearch');
+  const clearBtn = document.getElementById('searchClearBtn');
+  clearBtn.style.display = input.value ? 'block' : 'none';
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    sessionQuery = input.value.trim();
+    loadSessions(true);  // 重置到第 1 页
+  }, 300);
+}
+
+function clearSearch() {
+  const input = document.getElementById('sessionSearch');
+  input.value = '';
+  document.getElementById('searchClearBtn').style.display = 'none';
+  sessionQuery = '';
+  loadSessions(true);
+}
+
+async function switchSession(sid) {
+  if (sid === currentSessionId) return;
+  if (isWaiting) {
+    if (!confirm('正在对话中，切换会丢失当前生成。确认切换？')) return;
+  }
+  currentSessionId = sid;
+  // 更新侧栏高亮
+  document.querySelectorAll('.session-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.sid === sid);
+  });
+  // 加载历史消息
+  await loadSessionHistory(sid);
+}
+
+async function loadSessionHistory(sid) {
+  try {
+    // Stage 2：走 /sessions/{sid}/messages 拿完整 reasoning + tokens
+    const r = await fetch(`/sessions/${sid}/messages`);
+    if (!r.ok) {
+      chatEl.innerHTML = `<div class="msg error"><div class="bubble">❌ 会话不存在或已删除</div></div>`;
+      return;
+    }
+    const d = await r.json();
+    renderMessages(d.messages);
+    // 顶部加一条小提示，展示当前加载的历史会话元信息
+    if (d.messages && d.messages.length > 0) {
+      const meta = `${d.title} · ${d.message_count} 条消息`;
+      const hint = document.createElement('div');
+      hint.className = 'msg system';
+      hint.innerHTML = `<div class="bubble" style="font-size:11px;">📂 已加载历史会话：${escapeHtml(meta)}</div>`;
+      chatEl.insertBefore(hint, chatEl.firstChild);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+  } catch (e) {
+    chatEl.innerHTML = `<div class="msg error"><div class="bubble">❌ 加载失败: ${e.message}</div></div>`;
+  }
+}
+
+function renderMessages(messages) {
+  chatEl.innerHTML = '';
+  if (!messages || messages.length === 0) {
+    chatEl.innerHTML = `<div class="msg system"><div class="bubble">空会话</div></div>`;
+    return;
+  }
+  for (const msg of messages) {
+    if (msg.role === 'user') {
+      appendMsg('user', msg.content, false, null);
+    } else if (msg.role === 'assistant') {
+      // Stage 2：assistant 消息如有 reasoning，渲染为折叠区 + meta 行
+      renderAssistantMessage(msg);
+    }
+    // system 消息跳过（理论上不会有，跳过更安全）
+  }
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function renderAssistantMessage(msg) {
+  // 创建 assistantEl（仿照 sendStream 的结构）
+  const assistantEl = document.createElement('div');
+  assistantEl.className = 'msg assistant';
+  assistantEl.dataset.sid = msg.session_id;
+
+  // 思考过程折叠区（如果有）
+  if (msg.reasoning && msg.reasoning.trim()) {
+    const reasoningEl = document.createElement('details');
+    reasoningEl.className = 'reasoning-block';
+    const summary = document.createElement('summary');
+    summary.textContent = `💭 思考过程（${msg.reasoning.length} 字符，点击展开）`;
+    const reasoningContent = document.createElement('div');
+    reasoningContent.className = 'reasoning-content';
+    reasoningContent.textContent = msg.reasoning;
+    reasoningEl.appendChild(summary);
+    reasoningEl.appendChild(reasoningContent);
+    assistantEl.appendChild(reasoningEl);
+  }
+
+  // bubble-wrap（含复制按钮）
+  const { wrap } = createBubbleWrap(msg.content);
+  assistantEl.appendChild(wrap);
+
+  // meta 行（放在 assistantEl 末尾，跟 bubble 平级）
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const fallbackFlag = msg.is_fallback ? ' · ⚠️ fallback' : '';
+  const reasoningFlag = msg.reasoning ? ` · 💭 ${msg.reasoning.length} 字思考` : '';
+  meta.innerHTML = `<span class="provider-pill">${escapeHtml(msg.provider || '?')}</span> ` +
+                   `📊 ${msg.total_tokens || 0} tokens${fallbackFlag}${reasoningFlag}`;
+  assistantEl.appendChild(meta);
+
+  chatEl.appendChild(assistantEl);
+}
+
+async function newSession() {
+  // 防卡死：如果是「卡住状态」（按钮禁用但其实没事了），强制复位
+  if (isWaiting) {
+    setWaiting(false);
+  }
+  // 立即清空状态
+  currentSessionId = null;
+  chatEl.innerHTML = `<div class="msg system"><div class="bubble">🆕 新会话 — 发送消息开始对话</div></div>`;
+  // 更新侧栏（去掉高亮）
+  document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+  inputEl.focus();
+}
+
+async function deleteSession(sid) {
+  if (!confirm('删除这个会话？此操作不可恢复。')) return;
+  try {
+    await fetch(`/sessions/${sid}`, { method: 'DELETE' });
+    if (sid === currentSessionId) {
+      currentSessionId = null;
+      chatEl.innerHTML = `<div class="msg system"><div class="bubble">🗑️ 会话已删除</div></div>`;
+    }
+    await loadSessions();
+  } catch (e) {
+    alert('删除失败: ' + e.message);
+  }
+}
+
+newSessionBtn.addEventListener('click', newSession);
+
+// Stage 2 新增：搜索框 + 加载更多 + 刷新当前页
+document.getElementById('sessionSearch').addEventListener('input', onSearchInput);
+document.getElementById('searchClearBtn').addEventListener('click', clearSearch);
+document.getElementById('loadMoreBtn').addEventListener('click', loadMoreSessions);
+
+// ============== 发送消息 ==============
+// 只支持流式模式（SSE）。整段模式（POST /chat）保留为 API 但前端不调用。
+
+async function send() {
+  if (isWaiting) return;
+  const msg = inputEl.value.trim();
+  if (!msg) return;
+
+  appendMsg('user', msg);
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+  setWaiting(true);
+
+  const selectedProvider = providerSelect.value;
+  try {
+    // 直接走流式（SSE）
+    await sendStream(msg, selectedProvider);
+  } finally {
+    // 关键：无论成功还是异常，都要复位 isWaiting + 按钮
+    setWaiting(false);
+    inputEl.focus();
+  }
+
+  // 发送后刷新侧栏（标题已更新）
+  try { await loadSessions(true); } catch (e) { console.error('loadSessions failed:', e); }
+  // 重新高亮当前会话
+  document.querySelectorAll('.session-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.sid === currentSessionId);
+  });
+}
+
+async function sendStream(msg, provider) {
+  // 创建 assistant 消息容器（手写，避免 appendMsg 创建空 bubble）
+  const assistantEl = document.createElement('div');
+  assistantEl.className = 'msg assistant';
+  chatEl.appendChild(assistantEl);
+  chatEl.scrollTop = chatEl.scrollHeight;
+
+  let bubble = null;           // 内容气泡（收到第一个 content_delta 时创建）
+  let bubbleWrap = null;       // 包裹 bubble + 复制按钮的容器
+  let reasoningEl = null;      // 折叠区（收到第一个 reasoning_delta 时创建）
+  let reasoningContentEl = null;
+  let fullText = '';
+  let fullReasoning = '';
+  let userExpandedReasoning = false;  // 用户是否主动展开了折叠区
+
+  try {
+    const r = await fetch('/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: msg,
+        session_id: currentSessionId,
+        provider: provider || null,
+      }),
+    });
+
+    if (!r.ok) {
+      const err = await r.json();
+      let errType = 'unknown';
+      let errMsg = r.statusText;
+      if (Array.isArray(err.detail)) {
+        errType = 'validation_error';
+        errMsg = err.detail.map(e => `${e.loc?.join('.')}: ${e.msg}`).join('; ');
+      } else if (err.detail && typeof err.detail === 'object') {
+        errType = err.detail.error_type || 'unknown';
+        errMsg = err.detail.message || err.detail.error_msg || r.statusText;
+      }
+      bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.style.background = '#fee';
+      bubble.style.color = '#c53030';
+      bubble.textContent = `❌ [${errType}] ${errMsg}`;
+      assistantEl.appendChild(bubble);
+      assistantEl.classList.add('error');
+      return;
+    }
+
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let usage = {};
+    let providerUsed = '';
+    let fallbackUsed = false;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';
+      for (const ev of events) {
+        const lines = ev.split('\n');
+        let eventName = 'message';
+        let dataLine = '';
+        for (const line of lines) {
+          if (line.startsWith('event:')) eventName = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLine += line.slice(5).trim();
+        }
+        if (!dataLine) continue;
+        try {
+          const data = JSON.parse(dataLine);
+          if (eventName === 'start') {
+            currentSessionId = data.session_id;
+            providerUsed = data.primary_provider;
+          } else if (eventName === 'reasoning_delta') {
+            // 思考过程：累积到折叠区（懒加载：首次才创建 details）
+            fullReasoning += data.delta;
+            if (!reasoningEl) {
+              reasoningEl = document.createElement('details');
+              reasoningEl.className = 'reasoning-block thinking';
+              reasoningEl.open = false;
+              reasoningEl.dataset.startTs = Date.now();
+              const summary = document.createElement('summary');
+              summary.textContent = '💭 思考过程（思考中…）';
+              reasoningContentEl = document.createElement('div');
+              reasoningContentEl.className = 'reasoning-content';
+              reasoningEl.appendChild(summary);
+              reasoningEl.appendChild(reasoningContentEl);
+              // 监听用户是否主动展开
+              reasoningEl.addEventListener('toggle', () => {
+                if (reasoningEl.open) userExpandedReasoning = true;
+              });
+              assistantEl.appendChild(reasoningEl);
+            }
+            // 把累积的 reasoning 写入（首次写入前不是空字符串）
+            reasoningContentEl.textContent = fullReasoning;
+            providerUsed = data.provider;
+            chatEl.scrollTop = chatEl.scrollHeight;
+          } else if (eventName === 'content_delta') {
+            // 正常内容：累积到 bubble（懒加载：首次才创建 bubble）
+            fullText += data.delta;
+            if (!bubble) {
+              // 首次：用 bubble-wrap 包住 button + bubble
+              const created = createBubbleWrap(fullText);
+              bubble = created.bubble;
+              bubbleWrap = created.wrap;
+              assistantEl.appendChild(bubbleWrap);
+            } else {
+              // 后续追加 + cursor
+              bubble.innerHTML = escapeHtml(fullText) + '<span class="cursor"></span>';
+            }
+            // 折叠思考区（如果用户没主动展开过）
+            if (reasoningEl && !userExpandedReasoning) {
+              reasoningEl.open = false;
+              const summary = reasoningEl.querySelector('summary');
+              if (summary) summary.textContent = '💭 思考过程（点击展开）';
+            }
+            chatEl.scrollTop = chatEl.scrollHeight;
+            providerUsed = data.provider;
+          } else if (eventName === 'done') {
+            usage = data.usage || {};
+            if (data.provider && data.provider !== providerUsed) fallbackUsed = true;
+            providerUsed = data.provider;
+            if (bubble) bubble.innerHTML = escapeHtml(fullText);
+            // 思考区标题更新为「完成」
+            if (reasoningEl) {
+              const summary = reasoningEl.querySelector('summary');
+              if (summary) {
+                const secs = Math.round((Date.now() - (reasoningEl.dataset.startTs || Date.now())) / 1000);
+                summary.textContent = `💭 思考过程（${fullReasoning.length} 字符，点击展开）`;
+              }
+              reasoningEl.classList.remove('thinking');
+            }
+            // meta 行：放在 assistantEl 里（和 bubble 平级），不再塞进 bubble
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+            const pillClass = fallbackUsed ? 'provider-pill fallback' : 'provider-pill';
+            meta.innerHTML = `<span class="${pillClass}">${providerUsed}</span> ` +
+                             `📊 ${usage.completion_tokens || 0} tokens · 🌊 SSE` +
+                             (fullReasoning ? ` · 💭 ${fullReasoning.length} 字思考` : '');
+            assistantEl.appendChild(meta);
+            // 生成完成：自动 scroll 到 bubble 第一行（让用户从头阅读）
+            if (bubble) {
+              requestAnimationFrame(() => {
+                // 计算 bubble 相对 chat-container 顶部的位置，平滑滚动
+                const containerRect = chatEl.getBoundingClientRect();
+                const bubbleRect = bubble.getBoundingClientRect();
+                const offset = bubbleRect.top - containerRect.top + chatEl.scrollTop;
+                chatEl.scrollTo({ top: offset, behavior: 'smooth' });
+              });
+            }
+          } else if (eventName === 'error') {
+            // 错误：直接显示
+            const errEl = document.createElement('div');
+            errEl.className = 'bubble';
+            errEl.textContent = `❌ [${data.error_type}] ${data.error_msg}`;
+            errEl.style.background = '#fee';
+            errEl.style.color = '#c53030';
+            assistantEl.appendChild(errEl);
+            assistantEl.classList.add('error');
+          }
+        } catch (e) {
+          console.error('SSE parse error:', e);
+        }
+      }
+    }
+  } catch (e) {
+    bubble.innerHTML = `❌ 网络错误: ${e.message}`;
+    bubble.parentElement.classList.add('error');
+  } finally {
+    // 双保险：无论正常结束、异常、SSE 错误，都确保状态复位
+    setWaiting(false);
+    inputEl.focus();
+  }
+}
+
+// ============== UI helpers ==============
+
+function appendMsg(role, text, isHtml = false, meta = null) {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  if (isHtml) bubble.innerHTML = text;
+  else bubble.textContent = text;
+  div.appendChild(bubble);
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    if (typeof meta === 'string') m.innerHTML = meta;
+    div.appendChild(m);
+  }
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return div;
+}
+
+function escapeHtml(s) {
+  const map = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+  return String(s).replace(/[&<>"']/g, c => map[c]);
+}
+
+// ============== 复制按钮 + bubble-wrap ==============
+// SSE 流式时 bubble.innerHTML 会被反复覆盖，所以按钮不能放在 bubble 内部。
+// 用 bubble-wrap 容器包住按钮 + bubble，按钮作为 bubble 的 sibling 不受影响。
+
+function createBubbleWrap(initialText = '', options = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'bubble-wrap';
+
+  // 复制按钮（右上角）
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'copy-btn';
+  copyBtn.textContent = '📋 复制';
+  copyBtn.title = '复制全文到剪贴板';
+  // 阻止按钮冒泡触发其他事件
+  copyBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const text = bubble.textContent || '';
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      copyBtn.textContent = '✅ 已复制';
+      copyBtn.classList.add('copied');
+      setTimeout(() => {
+        copyBtn.textContent = '📋 复制';
+        copyBtn.classList.remove('copied');
+      }, 1500);
+    } else {
+      copyBtn.textContent = '❌ 失败';
+      setTimeout(() => { copyBtn.textContent = '📋 复制'; }, 1500);
+    }
+  });
+  wrap.appendChild(copyBtn);
+
+  // bubble 本身
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  if (initialText) {
+    bubble.innerHTML = escapeHtml(initialText);
+  }
+  wrap.appendChild(bubble);
+
+  return { wrap, bubble, copyBtn };
+}
+
+async function copyToClipboard(text) {
+  // 现代 API
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      // 降级
+    }
+  }
+  // 降级方案：临时 textarea + execCommand
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) {
+    console.error('copy failed:', e);
+    return false;
+  }
+}
+
+function setWaiting(waiting) {
+  isWaiting = waiting;
+  sendBtn.disabled = waiting;
+  sendBtn.textContent = waiting ? '...' : '发送';
+  inputEl.disabled = waiting;
+}
+
+function updateTopbarTitle() {
+  if (currentSessionId) {
+    topbarTitleEl.textContent = '🤖 VerticalAgent Stage 1 · 当前会话';
+  } else {
+    topbarTitleEl.textContent = '🤖 VerticalAgent Stage 1';
+  }
+}
+
+// ============== Providers ==============
+
+async function loadProviders() {
+  try {
+    const r = await fetch('/v1/models');
+    const d = await r.json();
+    providerSelect.innerHTML = '<option value="">Auto</option>';
+    d.providers.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.provider;
+      const icon = p.state === 'closed' ? '✅' : p.state === 'open' ? '🔴' : '🟡';
+      opt.textContent = `${icon} ${p.provider}`;
+      providerSelect.appendChild(opt);
+    });
+    // 更新侧栏底部信息
+    const summary = d.providers.map(p => {
+      const icon = p.state === 'closed' ? '🟢' : p.state === 'open' ? '🔴' : '🟡';
+      return `${icon}${p.provider}`;
+    }).join(' · ');
+    providerInfoEl.textContent = summary || '无 Provider';
+    providerInfoEl.title = summary;
+  } catch (e) {
+    providerInfoEl.textContent = '❌ 后端离线';
+  }
+}
+
+// ============== 事件 ==============
+
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
+});
+
+// 监听 currentSessionId 变化更新标题
+const _origSwitch = switchSession;
+const _origNew = newSession;
+
+// ============== 启动 ==============
+
+(async function init() {
+  await loadProviders();
+  await loadSessions();
+  // 不自动选 session，让用户主动操作（避免和「新会话」按钮冲突）
+  updateTopbarTitle();
+})();
+
+setInterval(loadProviders, 30000);
+setInterval(() => { if (!isWaiting) loadSessions(true); }, 10000);
+</script>
+
+</body>
+</html>

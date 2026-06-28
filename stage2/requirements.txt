@@ -1,0 +1,8 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+openai>=1.30
+pydantic>=2.5
+python-dotenv>=1.0
+sqlalchemy>=2.0
+# Stage 2 新增：SQLAlchemy 2.x ORM + SQLite 持久化
+# 后期切 PostgreSQL：再装 psycopg2-binary，把 DB_URL 改成 postgresql://... 即可
