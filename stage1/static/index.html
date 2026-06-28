@@ -137,6 +137,12 @@
   }
   .msg.user .bubble { background: #1f4e79; color: #fff; border-bottom-right-radius: 4px; }
   .msg.assistant .bubble { background: #fff; color: #202123; border: 1px solid #e5e5e5; border-bottom-left-radius: 4px; }
+  /* 空 bubble（仅 cursor 占位）：消除 padding 和边框，不占视觉空间 */
+  .msg.assistant .bubble.placeholder {
+    padding: 0;
+    border: none;
+    background: transparent;
+  }
   /* assistant 内可能含折叠区 + bubble，需要纵向堆叠 */
   .msg.assistant { flex-direction: column; align-items: flex-start; }
   .msg.system .bubble { background: #f0f0f0; color: #6e6e80; border: none; text-align: center; font-size: 13px; max-width: 90%; }
@@ -228,6 +234,11 @@
     line-height: 1.6;
     max-height: 300px;
     overflow-y: auto;
+  }
+  /* reasoning 内容为空时不占 padding 高度 */
+  details.reasoning-block .reasoning-content:empty {
+    padding: 0;
+    min-height: 0;
   }
   details.reasoning-block.thinking {
     /* 流式思考中：左侧加个动效 */
@@ -534,9 +545,9 @@ async function sendStream(msg, provider) {
                 if (reasoningEl.open) userExpandedReasoning = true;
               });
               assistantEl.appendChild(reasoningEl);
-              // 同时创建内容气泡（带 cursor）
+              // 同时创建内容气泡（带 cursor，placeholder 状态不显示 padding）
               bubble = document.createElement('div');
-              bubble.className = 'bubble';
+              bubble.className = 'bubble placeholder';
               bubble.innerHTML = '<span class="cursor"></span>';
               assistantEl.appendChild(bubble);
             }
@@ -549,10 +560,12 @@ async function sendStream(msg, provider) {
             if (!bubble) {
               // 没有 reasoning 的模型，直接创建 bubble
               bubble = document.createElement('div');
-              bubble.className = 'bubble';
+              bubble.className = 'bubble placeholder';
               bubble.innerHTML = '<span class="cursor"></span>';
               assistantEl.appendChild(bubble);
             }
+            // 移除 placeholder 类（恢复 padding 和边框）
+            bubble.classList.remove('placeholder');
             bubble.innerHTML = escapeHtml(fullText) + '<span class="cursor"></span>';
             // 折叠思考区（如果用户没主动展开过）
             if (reasoningEl && !userExpandedReasoning) {
