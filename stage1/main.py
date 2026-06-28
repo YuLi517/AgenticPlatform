@@ -277,24 +277,54 @@ class LLMProvider:
             )
             self.breaker.record_success()
             full_reply = ""
+            full_reasoning = ""  # 累积思考过程
             completion_tokens = 0
             for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    delta = chunk.choices[0].delta.content
-                    full_reply += delta
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+
+                # 兼容 OpenAI SDK 1.x：用 model_dump 取所有字段（含 reasoning_content）
+                delta_dict = {}
+                try:
+                    delta_dict = delta.model_dump(exclude_unset=False)
+                except Exception:
+                    pass
+
+                # 1) 提取 reasoning_content（DeepSeek-R1 / MiniMax-M2 / o1 等思维模型）
+                reasoning = delta_dict.get("reasoning_content") or ""
+                if reasoning:
+                    full_reasoning += reasoning
+                    yield {
+                        "ok": True,
+                        "is_final": False,
+                        "event": "reasoning_delta",  # SSE event 类型
+                        "delta": reasoning,
+                        "provider": self.config.name,
+                        "model": self.config.model,
+                    }
+
+                # 2) 提取 content（正常回答内容）
+                content = delta.content or ""
+                if content:
+                    full_reply += content
                     completion_tokens += 1
                     yield {
                         "ok": True,
                         "is_final": False,
-                        "delta": delta,
+                        "event": "content_delta",
+                        "delta": content,
                         "provider": self.config.name,
                         "model": self.config.model,
                     }
+
             yield {
                 "ok": True,
                 "is_final": True,
+                "event": "done",
                 "delta": "",
                 "reply": full_reply,
+                "reasoning": full_reasoning,  # 完整思考内容
                 "provider": self.config.name,
                 "model": self.config.model,
                 "usage": {
@@ -609,9 +639,18 @@ def chat_stream(req: ChatRequest):
             if chunk.get("is_final"):
                 full_reply = chunk.get("reply", "")
                 provider_used = chunk.get("provider")
-                yield f"event: done\ndata: {json.dumps({'usage': chunk.get('usage', {}), 'provider': provider_used}, ensure_ascii=False)}\n\n"
+                # 完整事件：含 reasoning（用于历史会话展示）
+                yield (
+                    f"event: done\n"
+                    f"data: {json.dumps({'usage': chunk.get('usage', {}), 'provider': provider_used, 'reasoning': chunk.get('reasoning', '')}, ensure_ascii=False)}\n\n"
+                )
             else:
-                yield f"event: delta\ndata: {json.dumps({'delta': chunk.get('delta', ''), 'provider': chunk.get('provider')}, ensure_ascii=False)}\n\n"
+                # 推理过程 / 正常内容 各自独立 SSE event
+                event_type = chunk.get("event", "delta")  # reasoning_delta / content_delta
+                yield (
+                    f"event: {event_type}\n"
+                    f"data: {json.dumps({'delta': chunk.get('delta', ''), 'provider': chunk.get('provider')}, ensure_ascii=False)}\n\n"
+                )
 
         if full_reply:
             sessions.append(sid, {"role": "user", "content": req.message})

@@ -137,6 +137,8 @@
   }
   .msg.user .bubble { background: #1f4e79; color: #fff; border-bottom-right-radius: 4px; }
   .msg.assistant .bubble { background: #fff; color: #202123; border: 1px solid #e5e5e5; border-bottom-left-radius: 4px; }
+  /* assistant 内可能含折叠区 + bubble，需要纵向堆叠 */
+  .msg.assistant { flex-direction: column; align-items: flex-start; }
   .msg.system .bubble { background: #f0f0f0; color: #6e6e80; border: none; text-align: center; font-size: 13px; max-width: 90%; }
   .msg.error .bubble { background: #fee; color: #c53030; border: 1px solid #fcc; }
   .msg .meta { font-size: 11px; color: #8e8ea0; margin-top: 6px; }
@@ -179,6 +181,58 @@
     background: #e3f2fd; color: #1565c0; margin-right: 4px;
   }
   .provider-pill.fallback { background: #fff3cd; color: #856404; }
+
+  /* 思考过程折叠区（仿 ChatGPT o1 / DeepSeek-R1） */
+  details.reasoning-block {
+    margin-bottom: 8px;
+    background: #fafafa;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    font-size: 13px;
+    overflow: hidden;
+    max-width: 70%;
+  }
+  details.reasoning-block summary {
+    padding: 6px 10px;
+    cursor: pointer;
+    user-select: none;
+    font-weight: 500;
+    color: #6e6e80;
+    background: #ececf1;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+  }
+  details.reasoning-block summary::-webkit-details-marker { display: none; }
+  details.reasoning-block summary::before {
+    content: '▶';
+    margin-right: 6px;
+    font-size: 10px;
+    transition: transform 0.2s;
+    display: inline-block;
+  }
+  details.reasoning-block[open] summary::before {
+    transform: rotate(90deg);
+  }
+  details.reasoning-block[open] summary {
+    border-bottom: 1px solid #e5e5e5;
+  }
+  details.reasoning-block .reasoning-content {
+    padding: 10px 12px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: #6e6e80;
+    font-family: ui-monospace, 'Cascadia Mono', 'Consolas', 'Monaco', monospace;
+    font-size: 11.5px;
+    line-height: 1.6;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  details.reasoning-block.thinking {
+    /* 流式思考中：左侧加个动效 */
+    border-left: 3px solid #1f4e79;
+  }
 
   /* 移动端：折叠侧栏 */
   @media (max-width: 768px) {
@@ -388,9 +442,18 @@ async function send() {
 }
 
 async function sendStream(msg, provider) {
-  const assistantEl = appendMsg('assistant', '<span class="cursor"></span>');
-  const bubble = assistantEl.querySelector('.bubble');
+  // 创建 assistant 消息容器（手写，避免 appendMsg 创建空 bubble）
+  const assistantEl = document.createElement('div');
+  assistantEl.className = 'msg assistant';
+  chatEl.appendChild(assistantEl);
+  chatEl.scrollTop = chatEl.scrollHeight;
+
+  let bubble = null;           // 内容气泡（收到第一个 content_delta 时创建）
+  let reasoningEl = null;      // 折叠区（收到第一个 reasoning_delta 时创建）
+  let reasoningContentEl = null;
   let fullText = '';
+  let fullReasoning = '';
+  let userExpandedReasoning = false;  // 用户是否主动展开了折叠区
 
   try {
     const r = await fetch('/chat/stream', {
@@ -414,8 +477,13 @@ async function sendStream(msg, provider) {
         errType = err.detail.error_type || 'unknown';
         errMsg = err.detail.message || err.detail.error_msg || r.statusText;
       }
-      bubble.innerHTML = `❌ [${errType}] ${errMsg}`;
-      bubble.parentElement.classList.add('error');
+      bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.style.background = '#fee';
+      bubble.style.color = '#c53030';
+      bubble.textContent = `❌ [${errType}] ${errMsg}`;
+      assistantEl.appendChild(bubble);
+      assistantEl.classList.add('error');
       return;
     }
 
@@ -446,25 +514,85 @@ async function sendStream(msg, provider) {
           if (eventName === 'start') {
             currentSessionId = data.session_id;
             providerUsed = data.primary_provider;
-          } else if (eventName === 'delta') {
+          } else if (eventName === 'reasoning_delta') {
+            // 思考过程：累积到折叠区
+            fullReasoning += data.delta;
+            if (!reasoningEl) {
+              reasoningEl = document.createElement('details');
+              reasoningEl.className = 'reasoning-block thinking';
+              reasoningEl.open = true;  // 流式思考中默认展开
+              reasoningEl.dataset.startTs = Date.now();
+              const summary = document.createElement('summary');
+              summary.textContent = '💭 思考过程（思考中…）';
+              reasoningContentEl = document.createElement('div');
+              reasoningContentEl.className = 'reasoning-content';
+              reasoningContentEl.textContent = '';
+              reasoningEl.appendChild(summary);
+              reasoningEl.appendChild(reasoningContentEl);
+              // 监听用户是否主动展开
+              reasoningEl.addEventListener('toggle', () => {
+                if (reasoningEl.open) userExpandedReasoning = true;
+              });
+              assistantEl.appendChild(reasoningEl);
+              // 同时创建内容气泡（带 cursor）
+              bubble = document.createElement('div');
+              bubble.className = 'bubble';
+              bubble.innerHTML = '<span class="cursor"></span>';
+              assistantEl.appendChild(bubble);
+            }
+            reasoningContentEl.textContent = fullReasoning;
+            providerUsed = data.provider;
+            chatEl.scrollTop = chatEl.scrollHeight;
+          } else if (eventName === 'content_delta') {
+            // 正常内容：累积到 bubble
             fullText += data.delta;
+            if (!bubble) {
+              // 没有 reasoning 的模型，直接创建 bubble
+              bubble = document.createElement('div');
+              bubble.className = 'bubble';
+              bubble.innerHTML = '<span class="cursor"></span>';
+              assistantEl.appendChild(bubble);
+            }
             bubble.innerHTML = escapeHtml(fullText) + '<span class="cursor"></span>';
+            // 折叠思考区（如果用户没主动展开过）
+            if (reasoningEl && !userExpandedReasoning) {
+              reasoningEl.open = false;
+              const summary = reasoningEl.querySelector('summary');
+              if (summary) summary.textContent = '💭 思考过程（点击展开）';
+            }
             chatEl.scrollTop = chatEl.scrollHeight;
             providerUsed = data.provider;
           } else if (eventName === 'done') {
             usage = data.usage || {};
             if (data.provider && data.provider !== providerUsed) fallbackUsed = true;
             providerUsed = data.provider;
-            bubble.innerHTML = escapeHtml(fullText);
+            if (bubble) bubble.innerHTML = escapeHtml(fullText);
+            // 思考区标题更新为「完成」
+            if (reasoningEl) {
+              const summary = reasoningEl.querySelector('summary');
+              if (summary) {
+                const secs = Math.round((Date.now() - (reasoningEl.dataset.startTs || Date.now())) / 1000);
+                summary.textContent = `💭 思考过程（${fullReasoning.length} 字符，点击展开）`;
+              }
+              reasoningEl.classList.remove('thinking');
+            }
+            // meta 行
             const meta = document.createElement('div');
             meta.className = 'meta';
             const pillClass = fallbackUsed ? 'provider-pill fallback' : 'provider-pill';
             meta.innerHTML = `<span class="${pillClass}">${providerUsed}</span> ` +
-                             `📊 ${usage.completion_tokens || 0} tokens · 🌊 SSE`;
+                             `📊 ${usage.completion_tokens || 0} tokens · 🌊 SSE` +
+                             (fullReasoning ? ` · 💭 ${fullReasoning.length} 字思考` : '');
             assistantEl.appendChild(meta);
           } else if (eventName === 'error') {
-            bubble.innerHTML = `❌ [${data.error_type}] ${data.error_msg}`;
-            bubble.parentElement.classList.add('error');
+            // 错误：直接显示
+            const errEl = document.createElement('div');
+            errEl.className = 'bubble';
+            errEl.textContent = `❌ [${data.error_type}] ${data.error_msg}`;
+            errEl.style.background = '#fee';
+            errEl.style.color = '#c53030';
+            assistantEl.appendChild(errEl);
+            assistantEl.classList.add('error');
           }
         } catch (e) {
           console.error('SSE parse error:', e);
