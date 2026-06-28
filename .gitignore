@@ -7,9 +7,12 @@ __pycache__/
 .env
 .env.local
 .env.*
+.env_*
 *.bak
 .env.bak
 .env.MiniMax
+.env_minimax_bak
+.env.example.bak
 
 # 虚拟环境
 venv/

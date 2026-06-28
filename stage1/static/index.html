@@ -330,12 +330,16 @@ function renderMessages(messages) {
 }
 
 async function newSession() {
-  // 立即创建空 session 并切换
-  currentSessionId = null;  // 让后端生成
+  // 防卡死：如果是「卡住状态」（按钮禁用但其实没事了），强制复位
+  if (isWaiting) {
+    setWaiting(false);
+  }
+  // 立即清空状态
+  currentSessionId = null;
   chatEl.innerHTML = `<div class="msg system"><div class="bubble">🆕 新会话 — 发送消息开始对话</div></div>`;
   // 更新侧栏（去掉高亮）
   document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
-  // 不需要立刻刷新列表，等用户发了第一条消息后才会真正创建
+  inputEl.focus();
 }
 
 async function deleteSession(sid) {
@@ -373,13 +377,20 @@ async function send() {
   setWaiting(true);
 
   const selectedProvider = providerSelect.value;
-  if (streamMode) {
-    await sendStream(msg, selectedProvider);
-  } else {
-    await sendNonStream(msg, selectedProvider);
+  try {
+    if (streamMode) {
+      await sendStream(msg, selectedProvider);
+    } else {
+      await sendNonStream(msg, selectedProvider);
+    }
+  } finally {
+    // 关键：无论成功还是异常，都要复位 isWaiting + 按钮
+    setWaiting(false);
+    inputEl.focus();
   }
+
   // 发送后刷新侧栏（标题已更新）
-  await loadSessions();
+  try { await loadSessions(); } catch (e) { console.error('loadSessions failed:', e); }
   // 重新高亮当前会话
   document.querySelectorAll('.session-item').forEach(el => {
     el.classList.toggle('active', el.dataset.sid === currentSessionId);
@@ -473,6 +484,10 @@ async function sendStream(msg, provider) {
   } catch (e) {
     bubble.innerHTML = `❌ 网络错误: ${e.message}`;
     bubble.parentElement.classList.add('error');
+  } finally {
+    // 双保险：无论正常结束、异常、SSE 错误，都确保状态复位
+    setWaiting(false);
+    inputEl.focus();
   }
 }
 
@@ -515,9 +530,7 @@ async function sendNonStream(msg, provider) {
   } catch (e) {
     loadingEl.remove();
     appendMsg('error', `❌ 网络错误: ${e.message}`);
-  } finally {
-    setWaiting(false);
-    inputEl.focus();
+    // 注意：setWaiting(false) 由 send 函数的 finally 处理
   }
 }
 
@@ -610,12 +623,7 @@ const _origNew = newSession;
 (async function init() {
   await loadProviders();
   await loadSessions();
-  // 默认选择最新的会话（如果有）
-  const items = document.querySelectorAll('.session-item');
-  if (items.length > 0 && !currentSessionId) {
-    const firstSid = items[0].dataset.sid;
-    await switchSession(firstSid);
-  }
+  // 不自动选 session，让用户主动操作（避免和「新会话」按钮冲突）
   updateTopbarTitle();
 })();
 
