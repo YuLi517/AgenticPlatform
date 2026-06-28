@@ -42,16 +42,15 @@ VerticalAgent Stage 2 —— 会话持久化 + 历史回放
 import os
 import json
 import time
-import uuid
 import logging
 from enum import Enum
 from collections import deque
 from threading import Lock
 from contextlib import asynccontextmanager
-from typing import Optional, List, Dict, Any, Generator
-from dataclasses import dataclass, field
+from typing import Optional, List, Generator
+from dataclasses import dataclass
 
-from fastapi import FastAPI, HTTPException, status, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -520,7 +519,7 @@ async def lifespan(app: FastAPI):
     # 初始化数据库（创建表 + 索引）
     init_db()
     log.info("=" * 60)
-    log.info(f"🚀 VerticalAgent Stage 2 启动（SQLite 持久化已启用）")
+    log.info("🚀 VerticalAgent Stage 2 启动（SQLite 持久化已启用）")
     log.info(f"   路由链（按优先级）: {' → '.join(p.config.name for p in providers)}")
     for p in providers:
         log.info(f"   {p.config.name}: {p.config.base_url} ({p.config.model})")

@@ -45,10 +45,10 @@ from enum import Enum
 from collections import deque
 from threading import Lock
 from contextlib import asynccontextmanager
-from typing import Optional, List, Dict, Any, Generator
-from dataclasses import dataclass, field
+from typing import Optional, List, Dict, Generator
+from dataclasses import dataclass
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -558,7 +558,7 @@ class ChatResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("=" * 60)
-    log.info(f"🚀 VerticalAgent Stage 1 启动")
+    log.info("🚀 VerticalAgent Stage 1 启动")
     log.info(f"   路由链（按优先级）: {' → '.join(p.config.name for p in providers)}")
     for p in providers:
         log.info(f"   {p.config.name}: {p.config.base_url} ({p.config.model})")
