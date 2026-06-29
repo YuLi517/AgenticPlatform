@@ -16,7 +16,7 @@ Stage 2 数据层入口：
 
 import os
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 
 # ============== 数据库路径 ==============
 

@@ -26,7 +26,7 @@ import time
 import uuid
 from typing import List, Optional, Tuple
 
-from sqlalchemy import select, or_, func, delete
+from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session as DbSession
 
 from models import (
