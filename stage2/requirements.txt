@@ -5,6 +5,11 @@ pydantic>=2.5
 python-dotenv>=1.0
 sqlalchemy>=2.0
 numpy>=1.24
+python-docx>=1.1
+pypdf>=4.0
+python-multipart>=0.0.12
 # Stage 2 新增：SQLAlchemy 2.x ORM + SQLite 持久化
 # Stage 2C 新增：numpy 加速向量 cosine 检索（1 万级以下纯 Python 也行，10 万级以上 numpy 必备）
+# Stage 2C 新增：python-docx（解析 .docx 文件）+ pypdf（解析 .pdf 文件）—— 支持文件上传到知识库
+# Stage 2C 新增：python-multipart（FastAPI 处理 multipart/form-data 文件上传必需）
 # 后期切 PostgreSQL：再装 psycopg2-binary，把 DB_URL 改成 postgresql://... 即可

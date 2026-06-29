@@ -50,7 +50,7 @@ from contextlib import asynccontextmanager
 from typing import Optional, List, Generator
 from dataclasses import dataclass
 
-from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -63,6 +63,7 @@ from database import get_db, init_db, SessionLocal
 from repository import SessionRepository, DocumentRepository, ChunkRepository
 from embedding import EmbeddingClient, load_embedding_config_from_env
 from rag import chunk_text, cosine_search, build_rag_prompt, parse_embedding
+from document_parser import parse_document, is_supported_file, supported_extensions
 
 # 自动加载 main.py 旁边的 .env（无论从哪个目录启动都能加载到）
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
@@ -947,6 +948,191 @@ def delete_document(doc_id: int, db: DbSession = Depends(get_db)):
         raise HTTPException(404, "document not found")
     db.commit()
     return {"ok": True}
+
+
+# ============== 文件上传 + JSON chunks 导入 ==============
+
+MAX_FILE_BYTES = 20 * 1024 * 1024  # 20MB
+
+
+@app.post("/documents/upload")
+async def upload_document(
+    file: UploadFile = File(..., description="支持 .txt / .md / .docx / .pdf（≤20MB）"),
+    title: str = Form("", description="文档标题（留空则用文件名）"),
+    chunk_size: int = Form(500, ge=100, le=2000),
+    overlap: int = Form(50, ge=0, le=200),
+    db: DbSession = Depends(get_db),
+):
+    """
+    上传文件到知识库。
+
+    自动识别扩展名分发解析：
+        .txt  → UTF-8 / GBK 解码
+        .md   → UTF-8 + 解析 YAML frontmatter（title/tags/source）
+        .docx → python-docx 提段落
+        .pdf  → pypdf 提所有页文本
+
+    流程：解析 → 切片 → embedding → 落库（与 POST /documents 一致）。
+    """
+    if not embedding_client:
+        raise HTTPException(503, "RAG 不可用：未配置 EMBEDDING_PROVIDER")
+
+    # 1. 文件名校验 + 大小限制
+    filename = file.filename or "unnamed"
+    if not is_supported_file(filename):
+        exts = ", ".join(supported_extensions())
+        raise HTTPException(400, f"不支持的文件类型。文件名: {filename!r}，支持: {exts}")
+
+    content = await file.read()
+    if len(content) > MAX_FILE_BYTES:
+        raise HTTPException(413, f"文件过大：{len(content)} bytes（限制 {MAX_FILE_BYTES} bytes / 20MB）")
+    if len(content) == 0:
+        raise HTTPException(400, "文件为空")
+
+    # 2. 解析文件
+    try:
+        text, metadata = parse_document(filename, content)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        log.exception(f"❌ 解析失败: {filename}")
+        raise HTTPException(422, f"文件解析失败: {type(e).__name__}: {e}")
+
+    if not text or not text.strip():
+        raise HTTPException(422, "文件解析后内容为空（可能是扫描版 PDF 或图片型 DOCX）")
+
+    # 3. 标题优先级：用户指定 > frontmatter title > 文件名
+    if not title or not title.strip():
+        title = metadata.get("title") or metadata.get("doc_title") or metadata.get("pdf_title") or filename
+
+    # 4. source 优先级：frontmatter source > 文件名
+    source = metadata.get("source") or filename
+
+    log.info(f"📄 解析 {filename}: {len(content)} bytes → {len(text)} 字符 (metadata: {list(metadata.keys())})")
+
+    # 5. 切片 + embedding + 落库（复用 DocumentRepository 逻辑）
+    chunks = chunk_text(text, chunk_size=chunk_size, overlap=overlap)
+    if not chunks:
+        raise HTTPException(400, "文档切片为空")
+
+    vectors = embedding_client.embed(chunks)
+    if not vectors or len(vectors) != len(chunks):
+        raise HTTPException(502, f"Embedding API 失败 ({len(chunks)} 期望, {len(vectors) if vectors else 0} 实际)")
+
+    doc_repo = DocumentRepository(db)
+    chunk_repo = ChunkRepository(db)
+    doc = doc_repo.create(
+        title=title.strip()[:255],
+        source=source,
+        doc_type=metadata.get("extension", "file").lstrip("."),
+        embedding_provider=embedding_client.config.provider,
+        embedding_model=embedding_client.config.model,
+        embedding_dim=embedding_client.dimension,
+        # 把解析元数据 + frontmatter 存到 metadata_json
+        metadata={
+            **metadata,
+            "upload_filename": filename,
+        },
+    )
+    chunk_repo.add_chunks(
+        document_id=doc.id,
+        chunks=[(i, c, v) for i, (c, v) in enumerate(zip(chunks, vectors))],
+    )
+    doc_repo.update_chunk_count(doc.id, len(chunks))
+    db.commit()
+
+    log.info(f"💾 文件入库: id={doc.id} title={doc.title!r} chunks={len(chunks)} dim={embedding_client.dimension}")
+    return doc.to_dict()
+
+
+class ChunkImport(BaseModel):
+    """JSON chunks 导入的单条 chunk"""
+    chunk_index: Optional[int] = None
+    content: str = Field(..., min_length=1, description="chunk 文本内容")
+    embedding: Optional[List[float]] = Field(None, description="可选的预计算 embedding（不传则批量调 API 补）")
+
+
+class DocumentImport(BaseModel):
+    """JSON chunks 批量导入请求"""
+    title: str = Field(..., min_length=1, max_length=255)
+    source: Optional[str] = Field(None, description="来源标识")
+    doc_type: str = Field("imported", description="默认 'imported'")
+    chunks: List[ChunkImport] = Field(..., min_length=1, description="已切片的 chunks 列表")
+
+
+@app.post("/documents/import")
+def import_chunks(req: DocumentImport, db: DbSession = Depends(get_db)):
+    """
+    导入已切片的 chunks（支持带预计算 embedding）。
+
+    智能处理：
+        - chunks 带 embedding → 校验维度（与当前 EMBEDDING_DIMENSION 一致），不一致则**忽略 embedding 并自动重算**
+        - chunks 不带 embedding → 批量调 embedding API 计算
+        - 所有 chunk 落地后立即可被 RAG 检索
+
+    典型场景：从 LangChain / LlamaIndex / Cursor 等工具导出的 JSON 知识库。
+    """
+    if not embedding_client:
+        raise HTTPException(503, "RAG 不可用：未配置 EMBEDDING_PROVIDER")
+
+    expected_dim = embedding_client.dimension
+    n = len(req.chunks)
+
+    # 1. 分离：哪些 chunk 带有效 embedding，哪些需要补
+    vectors: List[Optional[List[float]]] = [None] * n
+    need_embed_indices: List[int] = []
+    rejected_dim = 0
+
+    for i, chunk in enumerate(req.chunks):
+        if chunk.embedding is not None and len(chunk.embedding) > 0:
+            if expected_dim and len(chunk.embedding) != expected_dim:
+                log.warning(
+                    f"⚠️ chunk[{i}] embedding 维度 {len(chunk.embedding)} ≠ 配置 {expected_dim}，"
+                    f"将忽略并重新计算"
+                )
+                rejected_dim += 1
+                need_embed_indices.append(i)
+            else:
+                vectors[i] = chunk.embedding
+        else:
+            need_embed_indices.append(i)
+
+    # 2. 批量补 embedding
+    if need_embed_indices:
+        log.info(f"📊 导入 {n} chunks：{n - len(need_embed_indices)} 带有效 embedding，{len(need_embed_indices)} 需要计算")
+        texts_to_embed = [req.chunks[i].content for i in need_embed_indices]
+        new_vectors = embedding_client.embed(texts_to_embed)
+        if not new_vectors or len(new_vectors) != len(need_embed_indices):
+            raise HTTPException(502, f"Embedding API 失败（{len(need_embed_indices)} 期望, {len(new_vectors) if new_vectors else 0} 实际）")
+        for idx, vec in zip(need_embed_indices, new_vectors):
+            vectors[idx] = vec
+
+    # 3. 写库
+    doc_repo = DocumentRepository(db)
+    chunk_repo = ChunkRepository(db)
+    doc = doc_repo.create(
+        title=req.title.strip(),
+        source=req.source or "json_import",
+        doc_type=req.doc_type,
+        embedding_provider=embedding_client.config.provider,
+        embedding_model=embedding_client.config.model,
+        embedding_dim=embedding_client.dimension,
+        metadata={
+            "import_format": "json",
+            "total_chunks": n,
+            "rejected_dims": rejected_dim,
+        },
+    )
+    chunks_data: List[tuple] = []
+    for i, chunk in enumerate(req.chunks):
+        idx = chunk.chunk_index if chunk.chunk_index is not None else i
+        chunks_data.append((idx, chunk.content, vectors[i]))
+    chunk_repo.add_chunks(document_id=doc.id, chunks=chunks_data)
+    doc_repo.update_chunk_count(doc.id, n)
+    db.commit()
+
+    log.info(f"💾 JSON 导入入库: id={doc.id} title={doc.title!r} chunks={n} rejected_dim={rejected_dim}")
+    return doc.to_dict()
 
 
 @app.post("/search", response_model=List[SearchHit])

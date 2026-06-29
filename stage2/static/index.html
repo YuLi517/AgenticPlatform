@@ -204,6 +204,76 @@
     cursor: not-allowed;
   }
 
+  /* Upload tabs */
+  #uploadDocModal .upload-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #e5e5e5;
+  }
+  #uploadDocModal .upload-tab {
+    flex: 1;
+    background: transparent;
+    border: none;
+    padding: 8px 4px;
+    color: #6e6e80;
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  #uploadDocModal .upload-tab:hover { color: #202123; }
+  #uploadDocModal .upload-tab.active {
+    color: #1f4e79;
+    border-bottom-color: #1f4e79;
+    font-weight: 500;
+  }
+
+  /* File drop zone */
+  #fileDropZone {
+    border: 2px dashed #d0d0d0;
+    border-radius: 8px;
+    padding: 32px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    margin: 8px 0 16px;
+    position: relative;
+  }
+  #fileDropZone:hover { border-color: #1f4e79; background: #f8faff; }
+  #fileDropZone.dragover { border-color: #1f4e79; background: #f0f7ff; }
+  #fileDropZone .file-drop-hint {
+    color: #6e6e80;
+    font-size: 13px;
+    line-height: 1.8;
+    pointer-events: none;
+  }
+  #fileDropZone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  #fileSelectedInfo {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #e3f2fd;
+    color: #1565c0;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  #fileClearBtn {
+    background: transparent;
+    border: none;
+    color: #1565c0;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+  }
+
   aside #sessionList {
     flex: 1;
     overflow-y: auto;
@@ -1325,18 +1395,63 @@ function renderDocumentList(docs) {
   }
 }
 
-// 上传 modal
+// 上传 modal（3 个 tab：粘贴文本 / 上传文件 / 导入 JSON）
 const uploadModal = document.createElement('div');
 uploadModal.id = 'uploadDocModal';
 uploadModal.innerHTML = `
   <div class="modal-content">
-    <h3>📚 上传文档到知识库</h3>
-    <label>文档标题</label>
-    <input type="text" id="docTitleInput" placeholder="例：RAG 入门教程" maxlength="255" />
-    <label>文档内容（支持长文本，会自动切片）</label>
-    <textarea id="docContentInput" placeholder="粘贴文档正文……"></textarea>
-    <label>来源（可选）</label>
-    <input type="text" id="docSourceInput" placeholder="文件名 / URL / 留空表示手动输入" />
+    <h3>📚 添加文档到知识库</h3>
+    <div class="upload-tabs">
+      <button class="upload-tab active" data-tab="text">📝 粘贴文本</button>
+      <button class="upload-tab" data-tab="file">📤 上传文件</button>
+      <button class="upload-tab" data-tab="json">{ } 导入 JSON</button>
+    </div>
+
+    <!-- Tab 1: 粘贴文本 -->
+    <div class="upload-panel" data-panel="text">
+      <label>文档标题</label>
+      <input type="text" id="docTitleInput" placeholder="例：RAG 入门教程" maxlength="255" />
+      <label>文档内容（支持长文本，会自动切片）</label>
+      <textarea id="docContentInput" placeholder="粘贴文档正文……"></textarea>
+      <label>来源（可选）</label>
+      <input type="text" id="docSourceInput" placeholder="文件名 / URL / 留空表示手动输入" />
+    </div>
+
+    <!-- Tab 2: 上传文件 -->
+    <div class="upload-panel" data-panel="file" style="display:none;">
+      <label>选择文件（支持 .txt / .md / .docx / .pdf，≤20MB）</label>
+      <div id="fileDropZone">
+        <input type="file" id="docFileInput" accept=".txt,.md,.markdown,.docx,.pdf" />
+        <div class="file-drop-hint">
+          📁 点击选择文件 或 拖到此处<br>
+          <small>支持 .txt / .md / .docx / .pdf（≤20MB）</small>
+        </div>
+        <div id="fileSelectedInfo" style="display:none;">
+          <span id="fileSelectedName"></span>
+          <button id="fileClearBtn" type="button">×</button>
+        </div>
+      </div>
+      <label>文档标题（留空用文件名）</label>
+      <input type="text" id="docFileTitle" placeholder="留空则用文件名" maxlength="255" />
+    </div>
+
+    <!-- Tab 3: 导入 JSON -->
+    <div class="upload-panel" data-panel="json" style="display:none;">
+      <label>JSON 格式（chunks 数组，可选带 embedding）</label>
+      <textarea id="docJsonInput" placeholder='{
+  "title": "我的预切片文档",
+  "source": "langchain-export.json",
+  "chunks": [
+    {"chunk_index": 0, "content": "...", "embedding": [0.1, 0.2, ...]},
+    {"chunk_index": 1, "content": "..."}
+  ]
+}'></textarea>
+      <small style="color:#6e6e80;">
+        💡 <b>embedding</b> 字段可选。维度与当前 EMBEDDING_DIMENSION 不一致会自动重算。<br>
+        适配 LangChain / LlamaIndex / Cursor 导出的 JSON 知识库。
+      </small>
+    </div>
+
     <div class="modal-actions">
       <button id="docCancelBtn">取消</button>
       <button id="docSubmitBtn" class="primary">上传并 Embedding</button>
@@ -1344,6 +1459,52 @@ uploadModal.innerHTML = `
   </div>
 `;
 document.body.appendChild(uploadModal);
+
+// tab 切换
+uploadModal.querySelectorAll('.upload-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const target = tab.dataset.tab;
+    uploadModal.querySelectorAll('.upload-tab').forEach(t => t.classList.toggle('active', t === tab));
+    uploadModal.querySelectorAll('.upload-panel').forEach(p => {
+      p.style.display = p.dataset.panel === target ? '' : 'none';
+    });
+  });
+});
+
+// 文件选择 / 拖拽
+const fileInput = document.getElementById('docFileInput');
+const fileSelectedInfo = document.getElementById('fileSelectedInfo');
+const fileSelectedName = document.getElementById('fileSelectedName');
+const fileDropZone = document.getElementById('fileDropZone');
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length > 0) showSelectedFile(fileInput.files[0]);
+});
+document.getElementById('fileClearBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  fileInput.value = '';
+  fileSelectedInfo.style.display = 'none';
+  fileDropZone.querySelector('.file-drop-hint').style.display = 'block';
+});
+fileDropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  fileDropZone.classList.add('dragover');
+});
+fileDropZone.addEventListener('dragleave', () => fileDropZone.classList.remove('dragover'));
+fileDropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  fileDropZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length > 0) {
+    fileInput.files = e.dataTransfer.files;
+    showSelectedFile(e.dataTransfer.files[0]);
+  }
+});
+
+function showSelectedFile(f) {
+  fileSelectedName.textContent = `${f.name} (${(f.size / 1024).toFixed(1)} KB)`;
+  fileSelectedInfo.style.display = 'flex';
+  fileDropZone.querySelector('.file-drop-hint').style.display = 'none';
+}
 
 uploadDocBtn.addEventListener('click', () => {
   uploadModal.classList.add('show');
@@ -1357,36 +1518,100 @@ uploadModal.addEventListener('click', (e) => {
 });
 
 document.getElementById('docSubmitBtn').addEventListener('click', async () => {
-  const title = document.getElementById('docTitleInput').value.trim();
-  const content = document.getElementById('docContentInput').value.trim();
-  const source = document.getElementById('docSourceInput').value.trim() || 'manual';
-  if (!title || !content) {
-    alert('标题和内容不能为空');
-    return;
-  }
   const submitBtn = document.getElementById('docSubmitBtn');
+  const activeTab = uploadModal.querySelector('.upload-tab.active').dataset.tab;
+
   submitBtn.disabled = true;
   submitBtn.textContent = '上传中...';
   try {
-    const r = await fetch('/documents', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, content, source, doc_type: 'text' }),
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${r.status}`);
+    let doc;
+    if (activeTab === 'text') {
+      doc = await submitText();
+    } else if (activeTab === 'file') {
+      doc = await submitFile();
+    } else if (activeTab === 'json') {
+      doc = await submitJson();
     }
-    const doc = await r.json();
     uploadModal.classList.remove('show');
-    document.getElementById('docTitleInput').value = '';
-    document.getElementById('docContentInput').value = '';
-    document.getElementById('docSourceInput').value = '';
+    resetAllForms();
     loadDocuments();
     alert(`✅ 上传成功\n\n文档 "${doc.title}" 已切为 ${doc.chunk_count} 段并 embedding 完成`);
   } catch (err) {
     alert('❌ 上传失败: ' + err.message);
   } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = '上传并 Embedding';
+  }
+});
+
+async function submitText() {
+  const title = document.getElementById('docTitleInput').value.trim();
+  const content = document.getElementById('docContentInput').value.trim();
+  const source = document.getElementById('docSourceInput').value.trim() || 'manual';
+  if (!title || !content) throw new Error('标题和内容不能为空');
+  const r = await fetch('/documents', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, content, source, doc_type: 'text' }),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+async function submitFile() {
+  const file = fileInput.files[0];
+  if (!file) throw new Error('请先选择文件');
+  const title = document.getElementById('docFileTitle').value.trim();
+  const formData = new FormData();
+  formData.append('file', file);
+  if (title) formData.append('title', title);
+  const r = await fetch('/documents/upload', { method: 'POST', body: formData });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+async function submitJson() {
+  const jsonText = document.getElementById('docJsonInput').value.trim();
+  if (!jsonText) throw new Error('请粘贴 JSON');
+  let payload;
+  try {
+    payload = JSON.parse(jsonText);
+  } catch (e) {
+    throw new Error('JSON 解析失败: ' + e.message);
+  }
+  // 基础校验
+  if (!payload.title) throw new Error('JSON 必须包含 title 字段');
+  if (!Array.isArray(payload.chunks) || payload.chunks.length === 0) throw new Error('JSON 必须包含非空 chunks 数组');
+  if (!payload.chunks.every(c => c.content)) throw new Error('每个 chunk 必须有 content 字段');
+
+  const r = await fetch('/documents/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+function resetAllForms() {
+  document.getElementById('docTitleInput').value = '';
+  document.getElementById('docContentInput').value = '';
+  document.getElementById('docSourceInput').value = '';
+  document.getElementById('docFileTitle').value = '';
+  document.getElementById('docJsonInput').value = '';
+  fileInput.value = '';
+  fileSelectedInfo.style.display = 'none';
+  fileDropZone.querySelector('.file-drop-hint').style.display = 'block';
+}
     submitBtn.disabled = false;
     submitBtn.textContent = '上传并 Embedding';
   }

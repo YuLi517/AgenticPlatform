@@ -37,10 +37,12 @@ http://localhost:8000
 | 4 | **加载历史会话** | 侧栏点击任意会话 | `GET /sessions/{sid}/messages`（含 reasoning + tokens） |
 | 5 | **完整元数据** | 数据库持久化字段 | reasoning / provider / model / prompt_tokens / completion_tokens / latency / fallback 标记 |
 | 6 | **DB 统计** | `GET /health` | sessions 总数 + messages 总数 |
-| 7 | **🆕 知识库文档管理** | 侧栏「文档库」tab | `POST /documents`（上传 + 切片 + embedding） |
-| 8 | **🆕 纯向量检索** | `POST /search` | cosine similarity（numpy 加速） |
-| 9 | **🆕 RAG 对话** | `/chat/rag` | 检索 top-k + 注入 system prompt + LLM 流式回答带 `[1][2]` 引用 |
-| 10 | **🆕 多种 Embedding 适配** | OpenAI / 智谱 / Qwen | `.env` 切 `EMBEDDING_PROVIDER`，OpenAI 兼容协议 |
+| 7 | **🆕 知识库文档管理** | 侧栏「文档库」tab | `POST /documents`（粘贴文本）/ `POST /documents/upload`（文件）/ `POST /documents/import`（JSON） |
+| 8 | **🆕 多种文件解析** | `.txt` / `.md` / `.docx` / `.pdf`（≤20MB） | 自动解析 + Markdown frontmatter + python-docx + pypdf |
+| 9 | **🆕 JSON chunks 导入** | 上传 JSON（带/不带预计算 embedding） | 维度不匹配自动 fallback 重算 |
+| 10 | **🆕 纯向量检索** | `POST /search` | cosine similarity（numpy 加速） |
+| 11 | **🆕 RAG 对话** | `/chat/rag` | 检索 top-k + 注入 system prompt + LLM 流式回答带 `[1][2]` 引用 |
+| 12 | **🆕 多种 Embedding 适配** | OpenAI / 智谱 / Qwen | `.env` 切 `EMBEDDING_PROVIDER`，OpenAI 兼容协议 |
 
 ## 📊 数据模型
 
@@ -241,6 +243,7 @@ stage2/
 ├── repository.py        # 业务层 CRUD 封装（Session / Document / Chunk）
 ├── embedding.py         # 🆕 Stage 2C: Embedding API 客户端（OpenAI 兼容）
 ├── rag.py               # 🆕 Stage 2C: 切片 + cosine 检索 + prompt 注入
+├── document_parser.py   # 🆕 Stage 2C 扩展: .txt / .md / .docx / .pdf 解析
 ├── requirements.txt
 ├── .env.example
 ├── data/                # 运行时生成
@@ -283,7 +286,7 @@ stage2/
 
 ## 🆕 Stage 2C API
 
-### 上传文档
+### 上传文档（粘贴文本）
 
 ```
 POST /documents
@@ -313,6 +316,66 @@ POST /documents
 ```
 
 **流水线**：切片（chunk_text）→ 批量 embedding → 写入 documents + chunks。
+
+### 上传文档（文件）🆕
+
+```
+POST /documents/upload  (multipart/form-data)
+  file: <binary>           # .txt / .md / .docx / .pdf（≤20MB）
+  title: <string>          # 留空则用 frontmatter.title 或文件名
+```
+
+**自动解析**：
+
+| 扩展名 | 解析方式 | 元数据 |
+|---|---|---|
+| `.txt` | UTF-8 / GBK 解码 | char_count |
+| `.md` | UTF-8 + YAML frontmatter | title / tags / source |
+| `.docx` | `python-docx` 提段落（+ 表格） | para_count / doc_title |
+| `.pdf` | `pypdf` 提所有页文本 | page_count / pdf_title / author |
+
+**Markdown frontmatter 自动识别**：
+```markdown
+---
+title: "RAG 入门"
+tags: [ai, llm, rag]
+source: "internal-wiki"
+---
+# 正文...
+```
+- `title` 自动作为文档标题
+- `tags` / `source` 存到 `metadata_json`
+- 没有 frontmatter 时回退到正文首行或文件名
+
+### 导入预切片 JSON 🆕
+
+```
+POST /documents/import
+{
+  "title": "我的预切片文档",
+  "source": "langchain-export.json",
+  "doc_type": "imported",
+  "chunks": [
+    {"chunk_index": 0, "content": "...", "embedding": [0.1, 0.2, ...]},  // embedding 可选
+    {"chunk_index": 1, "content": "...", "embedding": [0.3, 0.4, ...]},
+    {"chunk_index": 2, "content": "无 embedding 时自动调用 API 计算"}
+  ]
+}
+```
+
+**智能 embedding 处理**：
+- 带 `embedding` + 维度匹配（= 当前 `EMBEDDING_DIMENSION`）→ 直接入库
+- 带 `embedding` + 维度不匹配 → **忽略并自动重新计算**（脏数据保护）
+- 不带 `embedding` → 批量调 API 计算
+
+**适用场景**：从 LangChain / LlamaIndex / Cursor / 其他 RAG 工具导出的 JSON 知识库；跨项目迁移；跨模型迁移（不丢已有的预计算向量）。
+
+### 列出 / 删除文档
+
+```
+GET /documents?page=1&page_size=20&q=keyword
+DELETE /documents/{id}
+```
 
 ### 列出 / 删除文档
 
