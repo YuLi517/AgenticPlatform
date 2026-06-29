@@ -1,6 +1,6 @@
 """
-repository.py —— Session / Message 数据库操作封装
-=================================================
+repository.py —— Session / Message / Document / Chunk 数据库操作封装
+====================================================================
 
 设计目标：
     1. 业务层（main.py）只调 repository，不直接写 SQL
@@ -16,6 +16,10 @@ repository.py —— Session / Message 数据库操作封装
 翻页策略：
     - offset / limit（简单，对侧栏"加载更多"够用）
     - 总数单独查一次（select count） —— 单会话表几千行以下没问题
+
+Stage 2C 新增：
+    - DocumentRepository：文档元信息 CRUD
+    - ChunkRepository：chunk CRUD（极少直接调用，检索走 rag.py）
 """
 
 import time
@@ -25,7 +29,10 @@ from typing import List, Optional, Tuple
 from sqlalchemy import select, or_, func, delete
 from sqlalchemy.orm import Session as DbSession
 
-from models import Session as SessionModel, Message as MessageModel
+from models import (
+    Session as SessionModel, Message as MessageModel,
+    Document as DocumentModel, Chunk as ChunkModel,
+)
 
 
 # ============== 工具 ==============
@@ -223,3 +230,137 @@ class SessionRepository:
 
     def count_messages(self) -> int:
         return self.db.execute(select(func.count(MessageModel.id))).scalar() or 0
+
+
+# ============== DocumentRepository ==============
+
+class DocumentRepository:
+    """文档库 CRUD（Stage 2C：RAG 知识库）"""
+
+    def __init__(self, db: DbSession):
+        self.db = db
+
+    def create(
+        self,
+        title: str,
+        source: Optional[str] = None,
+        doc_type: str = "text",
+        embedding_provider: Optional[str] = None,
+        embedding_model: Optional[str] = None,
+        embedding_dim: Optional[int] = None,
+        metadata: Optional[dict] = None,
+    ) -> DocumentModel:
+        """创建文档元信息（chunks 由 add_chunks 后续添加）。"""
+        import json
+        d = DocumentModel(
+            title=title.strip()[:255] or "未命名文档",
+            source=source,
+            doc_type=doc_type,
+            chunk_count=0,
+            embedding_provider=embedding_provider,
+            embedding_model=embedding_model,
+            embedding_dim=embedding_dim,
+            metadata_json=json.dumps(metadata, ensure_ascii=False) if metadata else None,
+            created_at=_now(),
+        )
+        self.db.add(d)
+        self.db.flush()
+        return d
+
+    def get(self, doc_id: int) -> Optional[DocumentModel]:
+        return self.db.get(DocumentModel, doc_id)
+
+    def list_documents(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        q: Optional[str] = None,
+    ) -> Tuple[List[DocumentModel], int]:
+        """列出文档，按 created_at DESC。支持关键词搜索 title/source。"""
+        page = max(1, page)
+        page_size = max(1, min(page_size, 100))
+        stmt = select(DocumentModel)
+        if q:
+            like = f"%{q}%"
+            stmt = stmt.where(
+                or_(
+                    DocumentModel.title.like(like),
+                    DocumentModel.source.like(like),
+                )
+            )
+        total = self.db.execute(
+            select(func.count()).select_from(stmt.subquery())
+        ).scalar() or 0
+        items = list(
+            self.db.execute(
+                stmt.order_by(DocumentModel.created_at.desc())
+                .limit(page_size)
+                .offset((page - 1) * page_size)
+            ).scalars()
+        )
+        return items, total
+
+    def update_chunk_count(self, doc_id: int, chunk_count: int):
+        d = self.db.get(DocumentModel, doc_id)
+        if d:
+            d.chunk_count = chunk_count
+
+    def delete(self, doc_id: int) -> bool:
+        d = self.db.get(DocumentModel, doc_id)
+        if not d:
+            return False
+        self.db.delete(d)  # CASCADE 自动删 chunks
+        return True
+
+    def count(self) -> int:
+        return self.db.execute(select(func.count(DocumentModel.id))).scalar() or 0
+
+
+# ============== ChunkRepository ==============
+
+class ChunkRepository:
+    """文档切片 CRUD（Stage 2C）。检索在 rag.py 走 numpy，不直接用 repo。"""
+
+    def __init__(self, db: DbSession):
+        self.db = db
+
+    def add_chunks(
+        self,
+        document_id: int,
+        chunks: List[Tuple[int, str, List[float]]],  # [(chunk_index, content, embedding)]
+        token_counts: Optional[List[int]] = None,
+    ) -> List[ChunkModel]:
+        """批量插入 chunks。embedding 用 List[float]（调用方负责序列化）。"""
+        from rag import serialize_embedding
+        created: List[ChunkModel] = []
+        for i, (idx, content, vec) in enumerate(chunks):
+            tc = (token_counts[i] if token_counts and i < len(token_counts) else 0) or 0
+            c = ChunkModel(
+                document_id=document_id,
+                chunk_index=idx,
+                content=content,
+                embedding=serialize_embedding(vec),
+                token_count=tc,
+                created_at=_now(),
+            )
+            self.db.add(c)
+            created.append(c)
+        self.db.flush()
+        return created
+
+    def get_by_document(self, doc_id: int) -> List[ChunkModel]:
+        stmt = (
+            select(ChunkModel)
+            .where(ChunkModel.document_id == doc_id)
+            .order_by(ChunkModel.chunk_index)
+        )
+        return list(self.db.execute(stmt).scalars())
+
+    def get_by_ids(self, chunk_ids: List[int]) -> List[ChunkModel]:
+        if not chunk_ids:
+            return []
+        stmt = select(ChunkModel).where(ChunkModel.id.in_(chunk_ids))
+        return list(self.db.execute(stmt).scalars())
+
+    def count(self) -> int:
+        return self.db.execute(select(func.count(ChunkModel.id))).scalar() or 0

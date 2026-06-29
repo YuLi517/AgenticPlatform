@@ -60,7 +60,9 @@ from openai import OpenAI, APIError, APIConnectionError, RateLimitError, APITime
 from sqlalchemy.orm import Session as DbSession
 
 from database import get_db, init_db, SessionLocal
-from repository import SessionRepository
+from repository import SessionRepository, DocumentRepository, ChunkRepository
+from embedding import EmbeddingClient, load_embedding_config_from_env
+from rag import chunk_text, cosine_search, build_rag_prompt, parse_embedding
 
 # 自动加载 main.py 旁边的 .env（无论从哪个目录启动都能加载到）
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
@@ -512,17 +514,31 @@ class ChatResponse(BaseModel):
     fallback_used: bool
 
 
-# ============== FastAPI App ==============
+# ============== Embedding 客户端 (Stage 2C) ==============
+
+embedding_client: Optional[EmbeddingClient] = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 初始化数据库（创建表 + 索引）
     init_db()
+    # 初始化 embedding 客户端（如果 .env 配置了 EMBEDDING_PROVIDER）
+    global embedding_client
+    embed_cfg = load_embedding_config_from_env()
+    if embed_cfg:
+        embedding_client = EmbeddingClient(embed_cfg)
+        log.info(f"✅ Embedding: {embed_cfg.provider}/{embed_cfg.model} @ {embed_cfg.base_url}")
+    else:
+        log.warning("⚠️ EMBEDDING_PROVIDER 未配置，RAG 检索不可用（仅能用 chat）")
+
     log.info("=" * 60)
     log.info("🚀 VerticalAgent Stage 2 启动（SQLite 持久化已启用）")
     log.info(f"   路由链（按优先级）: {' → '.join(p.config.name for p in providers)}")
     for p in providers:
         log.info(f"   {p.config.name}: {p.config.base_url} ({p.config.model})")
+    if embedding_client:
+        log.info(f"   Embedding: {embed_cfg.provider}/{embed_cfg.model}")
     log.info(f"   监听: http://{settings.host}:{settings.port}")
     log.info(f"   Docs: http://{settings.host}:{settings.port}/docs")
     log.info("=" * 60)
@@ -799,6 +815,271 @@ def update_session(
             raise HTTPException(404, "session not found")
     db.commit()
     return {"ok": True}
+
+
+# ============== Stage 2C: RAG / 知识库 ==============
+
+class DocumentCreate(BaseModel):
+    """创建文档请求（直接传文本，不支持文件上传，简化起步）"""
+    title: str = Field(..., min_length=1, max_length=255, description="文档标题")
+    content: str = Field(..., min_length=1, description="文档正文")
+    source: Optional[str] = Field(None, description="来源标识（文件名/URL/'manual'）")
+    doc_type: str = Field("text", description="text / file / url")
+    chunk_size: int = Field(500, ge=100, le=2000)
+    overlap: int = Field(50, ge=0, le=200)
+
+
+class DocumentOut(BaseModel):
+    id: int
+    title: str
+    source: Optional[str]
+    doc_type: str
+    chunk_count: int
+    embedding_provider: Optional[str]
+    embedding_model: Optional[str]
+    embedding_dim: Optional[int]
+    created_at: float
+
+
+class SearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, description="查询文本")
+    top_k: int = Field(5, ge=1, le=20, description="返回条数")
+    min_score: float = Field(0.0, ge=-1.0, le=1.0, description="最低相似度阈值")
+
+
+class SearchHit(BaseModel):
+    chunk_id: int
+    document_id: int
+    document_title: str
+    chunk_index: int
+    content: str
+    score: float
+
+
+@app.post("/documents", response_model=DocumentOut)
+def create_document(req: DocumentCreate, db: DbSession = Depends(get_db)):
+    """创建文档：切片 → embedding → 存 chunks"""
+    if not embedding_client:
+        raise HTTPException(503, "RAG 不可用：未配置 EMBEDDING_PROVIDER")
+
+    # 1. 切片
+    chunks = chunk_text(req.content, chunk_size=req.chunk_size, overlap=req.overlap)
+    if not chunks:
+        raise HTTPException(400, "文档切片为空")
+    log.info(f"📄 文档切片: {len(chunks)} 段 (size={req.chunk_size}, overlap={req.overlap})")
+
+    # 2. embedding
+    vectors = embedding_client.embed(chunks)
+    if not vectors or len(vectors) != len(chunks):
+        raise HTTPException(502, f"Embedding API 失败或返回数量不匹配 ({len(chunks)} 期望, {len(vectors) if vectors else 0} 实际)")
+
+    # 3. 写入 DB
+    doc_repo = DocumentRepository(db)
+    chunk_repo = ChunkRepository(db)
+    doc = doc_repo.create(
+        title=req.title,
+        source=req.source,
+        doc_type=req.doc_type,
+        embedding_provider=embedding_client.config.provider,
+        embedding_model=embedding_client.config.model,
+        embedding_dim=embedding_client.dimension,
+    )
+    chunk_repo.add_chunks(
+        document_id=doc.id,
+        chunks=[(i, c, v) for i, (c, v) in enumerate(zip(chunks, vectors))],
+    )
+    doc_repo.update_chunk_count(doc.id, len(chunks))
+    db.commit()
+
+    log.info(f"💾 文档入库: id={doc.id} title={doc.title!r} chunks={len(chunks)}")
+    return doc.to_dict()
+
+
+@app.get("/documents")
+def list_documents(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    q: Optional[str] = Query(None, description="搜索关键词"),
+    db: DbSession = Depends(get_db),
+):
+    """列出文档库"""
+    repo = DocumentRepository(db)
+    items, total = repo.list_documents(page=page, page_size=page_size, q=q)
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "count": len(items),
+        "documents": [d.to_dict() for d in items],
+    }
+
+
+@app.delete("/documents/{doc_id}")
+def delete_document(doc_id: int, db: DbSession = Depends(get_db)):
+    """删除文档（CASCADE 删 chunks）"""
+    repo = DocumentRepository(db)
+    if not repo.delete(doc_id):
+        raise HTTPException(404, "document not found")
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/search", response_model=List[SearchHit])
+def search_chunks(req: SearchRequest, db: DbSession = Depends(get_db)):
+    """纯检索接口（不调用 LLM，直接返回 top-k chunks）"""
+    if not embedding_client:
+        raise HTTPException(503, "RAG 不可用：未配置 EMBEDDING_PROVIDER")
+
+    # 1. query embedding
+    query_vec = embedding_client.embed_one(req.query)
+    if not query_vec:
+        raise HTTPException(502, "query embedding 失败")
+
+    # 2. 加载所有 chunks（起步阶段全表扫描，10 万级以下 OK）
+    # 用 raw SQL 批量加载 + 只取 embedding 字段，避免 ORM 实例化开销
+    from sqlalchemy import text
+    rows = db.execute(
+        text("SELECT c.id, c.document_id, c.chunk_index, c.content, c.embedding, d.title "
+             "FROM chunks c JOIN documents d ON c.document_id = d.id")
+    ).fetchall()
+
+    if not rows:
+        return []
+
+    # 3. cosine 检索
+    vectors = [parse_embedding(r.embedding) for r in rows]
+    hits = cosine_search(query_vec, vectors, top_k=req.top_k, min_score=req.min_score)
+
+    # 4. 构造结果
+    results = []
+    for idx, score in hits:
+        r = rows[idx]
+        results.append(SearchHit(
+            chunk_id=r.id,
+            document_id=r.document_id,
+            document_title=r.title,
+            chunk_index=r.chunk_index,
+            content=r.content,
+            score=round(float(score), 4),
+        ))
+    return results
+
+
+class RagChatRequest(BaseModel):
+    """RAG 对话：检索 + 流式 LLM 回答"""
+    message: str = Field(..., min_length=1)
+    session_id: Optional[str] = None
+    top_k: int = Field(5, ge=1, le=10)
+    min_score: float = Field(0.0, ge=-1.0, le=1.0)
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    temperature: float = Field(0.7, ge=0, le=2)
+
+
+@app.post("/chat/rag")
+def chat_rag(req: RagChatRequest, db: DbSession = Depends(get_db)):
+    """RAG 对话：检索 top-k → 注入 system prompt → LLM 流式回答"""
+    if not embedding_client:
+        raise HTTPException(503, "RAG 不可用：未配置 EMBEDDING_PROVIDER")
+
+    # 1. 创建/获取 session
+    sess_repo = SessionRepository(db)
+    sid, sess = sess_repo.get_or_create(req.session_id, primary_provider=req.provider)
+    db.commit()  # 提前 commit，避免 SSE 流期间被 rollback
+
+    # 2. query embedding + 检索
+    query_vec = embedding_client.embed_one(req.message)
+    chunks_with_meta: list = []
+    if query_vec:
+        from sqlalchemy import text
+        rows = db.execute(
+            text("SELECT c.id, c.document_id, c.chunk_index, c.content, c.embedding, d.title "
+                 "FROM chunks c JOIN documents d ON c.document_id = d.id")
+        ).fetchall()
+        vectors = [parse_embedding(r.embedding) for r in rows]
+        hits = cosine_search(query_vec, vectors, top_k=req.top_k, min_score=req.min_score)
+        for idx, score in hits:
+            r = rows[idx]
+            chunks_with_meta.append({
+                "chunk_id": r.id,
+                "document_id": r.document_id,
+                "document_title": r.title,
+                "chunk_index": r.chunk_index,
+                "content": r.content,
+                "score": float(score),
+            })
+
+    # 3. 构造 system prompt（含 RAG context）
+    rag_system = build_rag_prompt(req.message, chunks_with_meta)
+
+    # 4. 历史消息
+    history = sess_repo.get_history_openai(sid, max_messages=settings.max_history)
+    messages = [{"role": "system", "content": rag_system}]
+    messages.extend(history)
+    messages.append({"role": "user", "content": req.message})
+
+    def event_generator():
+        primary = router.pick(req.provider, req.model)
+        yield f"event: start\ndata: {json.dumps({'session_id': sid, 'primary_provider': primary.config.name if primary else None, 'rag_chunks': len(chunks_with_meta), 'rag_sources': [{'doc': c['document_title'], 'score': round(c['score'], 3)} for c in chunks_with_meta]}, ensure_ascii=False)}\n\n"
+
+        full_reply = ""
+        full_reasoning = ""
+        provider_used = None
+        model_used = None
+        fallback_used = False
+        usage = {}
+        for chunk in router.chat_stream_with_fallback(
+            messages,
+            provider_name=req.provider,
+            model_name=req.model,
+            temperature=req.temperature,
+            max_tokens=settings.max_tokens,
+        ):
+            if not chunk.get("ok"):
+                yield f"event: error\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                return
+            if chunk.get("is_final"):
+                full_reply = chunk.get("reply", "")
+                full_reasoning = chunk.get("reasoning", "")
+                provider_used = chunk.get("provider")
+                model_used = chunk.get("model")
+                usage = chunk.get("usage", {})
+                yield (
+                    f"event: done\n"
+                    f"data: {json.dumps({'usage': usage, 'provider': provider_used, 'reasoning': full_reasoning, 'rag_chunks': chunks_with_meta}, ensure_ascii=False)}\n\n"
+                )
+            else:
+                event_type = chunk.get("event", "delta")
+                if chunk.get("fallback_used"):
+                    fallback_used = True
+                yield (
+                    f"event: {event_type}\n"
+                    f"data: {json.dumps({'delta': chunk.get('delta', ''), 'provider': chunk.get('provider')}, ensure_ascii=False)}\n\n"
+                )
+
+        # 写库
+        if full_reply:
+            try:
+                db2 = SessionLocal()
+                try:
+                    repo2 = SessionRepository(db2)
+                    repo2.append_message(sid=sid, role="user", content=req.message)
+                    repo2.append_message(
+                        sid=sid, role="assistant", content=full_reply,
+                        reasoning=full_reasoning or None,
+                        provider=provider_used, model=model_used,
+                        prompt_tokens=usage.get("prompt_tokens", 0),
+                        completion_tokens=usage.get("completion_tokens", 0),
+                        total_tokens=usage.get("total_tokens", 0),
+                        is_fallback=fallback_used,
+                    )
+                    db2.commit()
+                finally:
+                    db2.close()
+            except Exception as e:
+                log.error(f"❌ RAG 持久化失败: {e}")
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 # ============== 启动 ==============

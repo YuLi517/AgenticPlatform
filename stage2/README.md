@@ -1,7 +1,8 @@
-# VerticalAgent Stage 2 —— 会话持久化 + 历史回放
+# VerticalAgent Stage 2 —— 会话持久化 + RAG 知识库
 
-> 基于 [Implementation Plan](../Implementation_Plan.docx) **阶段 2** 的 **2A + 2B** 子任务：
-> 数据持久化（SQLite）+ 侧栏会话搜索 + 翻页 + 加载历史会话。
+> 基于 [Implementation Plan](../Implementation_Plan.docx) **阶段 2** 的 **2A + 2B + 2C** 子任务：
+> - **2A/2B**：数据持久化（SQLite）+ 侧栏会话搜索 + 翻页 + 加载历史会话
+> - **2C**：Embedding + 简单向量检索（cosine + numpy）+ RAG 注入
 >
 > 继承 Stage 1 全部能力：多 Provider 路由 + SSE 流式 + 熔断器 + Token 计量。
 
@@ -36,6 +37,10 @@ http://localhost:8000
 | 4 | **加载历史会话** | 侧栏点击任意会话 | `GET /sessions/{sid}/messages`（含 reasoning + tokens） |
 | 5 | **完整元数据** | 数据库持久化字段 | reasoning / provider / model / prompt_tokens / completion_tokens / latency / fallback 标记 |
 | 6 | **DB 统计** | `GET /health` | sessions 总数 + messages 总数 |
+| 7 | **🆕 知识库文档管理** | 侧栏「文档库」tab | `POST /documents`（上传 + 切片 + embedding） |
+| 8 | **🆕 纯向量检索** | `POST /search` | cosine similarity（numpy 加速） |
+| 9 | **🆕 RAG 对话** | `/chat/rag` | 检索 top-k + 注入 system prompt + LLM 流式回答带 `[1][2]` 引用 |
+| 10 | **🆕 多种 Embedding 适配** | OpenAI / 智谱 / Qwen | `.env` 切 `EMBEDDING_PROVIDER`，OpenAI 兼容协议 |
 
 ## 📊 数据模型
 
@@ -232,29 +237,150 @@ python main.py
 stage2/
 ├── main.py              # FastAPI 入口（800 行）
 ├── database.py          # SQLAlchemy 引擎 + Session 工厂
-├── models.py            # Session / Message ORM
-├── repository.py        # 业务层 CRUD 封装
+├── models.py            # Session / Message / Document / Chunk ORM
+├── repository.py        # 业务层 CRUD 封装（Session / Document / Chunk）
+├── embedding.py         # 🆕 Stage 2C: Embedding API 客户端（OpenAI 兼容）
+├── rag.py               # 🆕 Stage 2C: 切片 + cosine 检索 + prompt 注入
 ├── requirements.txt
 ├── .env.example
 ├── data/                # 运行时生成
 │   └── stage2.db        # SQLite 数据库（首次启动自动创建）
 └── static/
-    └── index.html       # 前端（侧栏加搜索 + 加载更多 + 历史回填）
+    └── index.html       # 前端（侧栏加搜索 + 加载更多 + 历史回填 + 🆕 文档库 tab）
+```
+
+## 🆕 Stage 2C 数据模型
+
+### `documents` 表
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER (PK) | autoincrement |
+| `title` | TEXT | 文档标题 |
+| `source` | TEXT | 来源（文件名/URL/manual） |
+| `doc_type` | TEXT | `text` / `file` / `url` |
+| `chunk_count` | INTEGER | 切片数量 |
+| `embedding_provider` / `embedding_model` / `embedding_dim` | TEXT/INT | 记录向量来源（未来混用不同模型时区分） |
+| `created_at` | REAL | unix timestamp，INDEX |
+| `metadata_json` | TEXT | 备用 JSON |
+
+### `chunks` 表
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER (PK) | autoincrement |
+| `document_id` | INTEGER (FK) | `ON DELETE CASCADE` |
+| `chunk_index` | INTEGER | 文档内顺序 |
+| `content` | TEXT | 切片文本 |
+| `embedding` | TEXT | **JSON 序列化的 float[]**（1536-2048 维，5-30KB/条） |
+| `token_count` | INTEGER | 估算的 token 数 |
+| `created_at` | REAL | unix timestamp |
+
+**索引**：
+- `documents.created_at` —— 文档列表按时间倒序
+- `chunks.document_id` —— 按文档查所有切片
+- `chunks.(document_id, chunk_index)` —— 复合索引，检索后回查
+
+## 🆕 Stage 2C API
+
+### 上传文档
+
+```
+POST /documents
+{
+  "title": "RAG 入门教程",
+  "content": "完整文档正文...",
+  "source": "manual",
+  "doc_type": "text",
+  "chunk_size": 500,
+  "overlap": 50
+}
+```
+
+**响应**：
+```json
+{
+  "id": 1,
+  "title": "RAG 入门教程",
+  "source": "manual",
+  "doc_type": "text",
+  "chunk_count": 3,
+  "embedding_provider": "openai",
+  "embedding_model": "text-embedding-3-small",
+  "embedding_dim": 1536,
+  "created_at": 1782650618.92
+}
+```
+
+**流水线**：切片（chunk_text）→ 批量 embedding → 写入 documents + chunks。
+
+### 列出 / 删除文档
+
+```
+GET /documents?page=1&page_size=20&q=keyword
+DELETE /documents/{id}
+```
+
+### 纯向量检索
+
+```
+POST /search
+{
+  "query": "什么是 RAG",
+  "top_k": 5,
+  "min_score": 0.0
+}
+```
+
+**响应**：`[SearchHit]`，每条含 chunk_id / document_title / content / score。
+起步阶段全表扫描所有 chunks（numpy 算 cosine）。10 万级以下 < 200ms。
+
+### RAG 对话
+
+```
+POST /chat/rag
+{
+  "message": "什么是 RAG？",
+  "session_id": "可选",
+  "top_k": 5,
+  "min_score": 0.0,
+  "provider": "deepseek",
+  "temperature": 0.7
+}
+```
+
+**SSE 事件流**：
+1. `event: start` —— `{"session_id", "primary_provider", "rag_chunks": 5, "rag_sources": [{"doc": "...", "score": 0.87}]}`
+2. `event: reasoning_delta` —— 思考过程（如有）
+3. `event: content_delta` —— 增量输出
+4. `event: done` —— 完成，`{"usage", "reasoning", "rag_chunks"}`
+
+**System prompt 注入模板**：
+
+```
+你是 VerticalAgent，一个基于检索增强生成（RAG）的助手。
+
+请严格根据下面提供的「参考资料」回答用户问题。
+
+参考资料：
+[1] (来自 RAG 入门教程) 相似度=0.87
+RAG 是检索增强生成……
+
+[2] (来自 向量库选型) 相似度=0.76
+……
 ```
 
 ## 🚧 不在 Stage 2 范围
 
 - ❌ 多租户隔离（Stage 2D）
-- ❌ RAG / 知识库（Stage 2C 后续）
-- ❌ Milvus / 向量库（10 万级再做）
+- ❌ Milvus / 向量库（10 万级再做；Stage 2E）
 - ❌ Skills / MCP（阶段 3）
 - ❌ 鉴权 / 登录
 
 ## 下一步
 
-Stage 2C：embedding + 简单向量检索 + RAG 注入。
-Stage 2D：多租户隔离（tenant_id + X-API-Key + 隔离自动化测试）。
-Stage 2E：Milvus 接入（1 Collection + 1 Partition 模式 + 压测到 10 万级 P99 < 500ms）。
+**Stage 2D**：多租户隔离（tenant_id + X-API-Key + 隔离自动化测试）。
+**Stage 2E**：Milvus 接入（1 Collection + 1 Partition 模式 + 压测到 10 万级 P99 < 500ms）。
 
 ## 许可
 

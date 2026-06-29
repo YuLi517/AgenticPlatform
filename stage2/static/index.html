@@ -39,6 +39,171 @@
   aside #newSessionBtn .icon { font-size: 14px; font-weight: bold; }
   aside #newSessionBtn .text { flex: 1; text-align: left; }
 
+  /* Stage 2C: 侧栏 tab 切换 */
+  #sidebar-tabs {
+    display: flex;
+    border-bottom: 1px solid #2d2d2d;
+    flex-shrink: 0;
+  }
+  .sidebar-tab {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #8e8ea0;
+    padding: 10px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .sidebar-tab:hover { color: #ececec; }
+  .sidebar-tab.active {
+    color: #ececec;
+    border-bottom-color: #1f4e79;
+  }
+
+  /* Stage 2C: 文档库面板 */
+  #documentPanel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #document-toolbar {
+    padding: 8px 12px;
+    border-bottom: 1px solid #2d2d2d;
+    flex-shrink: 0;
+  }
+  #uploadDocBtn {
+    width: 100%;
+    background: #1f4e79;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  #uploadDocBtn:hover { background: #163d5e; }
+  #documentList {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  #documentList::-webkit-scrollbar { width: 6px; }
+  #documentList::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 3px; }
+  .doc-item {
+    padding: 10px 12px;
+    border-radius: 6px;
+    margin-bottom: 4px;
+    background: #2a2b2c;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: border-color 0.15s;
+    position: relative;
+  }
+  .doc-item:hover { border-color: #4a4a4a; }
+  .doc-item .doc-title {
+    font-size: 13px;
+    color: #ececec;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 4px;
+  }
+  .doc-item .doc-meta {
+    font-size: 10px;
+    color: #6e6e80;
+    display: flex;
+    justify-content: space-between;
+  }
+  .doc-item .doc-delete {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: transparent;
+    border: none;
+    color: #8e8ea0;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s;
+    font-size: 14px;
+  }
+  .doc-item:hover .doc-delete { opacity: 0.8; }
+  .doc-item .doc-delete:hover { background: #c53030; color: #fff; opacity: 1; }
+
+  /* Stage 2C: 上传文档 modal */
+  #uploadDocModal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+  #uploadDocModal.show { display: flex; }
+  #uploadDocModal .modal-content {
+    background: #fff;
+    border-radius: 10px;
+    padding: 24px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  }
+  #uploadDocModal h3 { margin: 0 0 16px; color: #202123; font-size: 16px; }
+  #uploadDocModal label {
+    display: block;
+    font-size: 12px;
+    color: #6e6e80;
+    margin-bottom: 4px;
+    margin-top: 10px;
+  }
+  #uploadDocModal input[type="text"], #uploadDocModal textarea {
+    width: 100%;
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    box-sizing: border-box;
+  }
+  #uploadDocModal input[type="text"]:focus, #uploadDocModal textarea:focus {
+    border-color: #1f4e79;
+  }
+  #uploadDocModal textarea { min-height: 200px; resize: vertical; }
+  #uploadDocModal .modal-actions {
+    margin-top: 16px;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  #uploadDocModal button {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid #d0d0d0;
+    background: #fff;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #uploadDocModal button.primary {
+    background: #1f4e79;
+    color: #fff;
+    border-color: #1f4e79;
+  }
+  #uploadDocModal button.primary:disabled {
+    background: #c0c0c0;
+    border-color: #c0c0c0;
+    cursor: not-allowed;
+  }
+
   aside #sessionList {
     flex: 1;
     overflow-y: auto;
@@ -361,6 +526,11 @@
 
 <!-- ========== 左侧栏 ========== -->
 <aside id="sidebar">
+  <!-- Stage 2C 新增：tab 切换（会话 / 文档库） -->
+  <div id="sidebar-tabs">
+    <button class="sidebar-tab active" data-tab="sessions">💬 会话</button>
+    <button class="sidebar-tab" data-tab="documents">📚 文档库</button>
+  </div>
   <div id="sidebar-header">
     <button id="newSessionBtn">
       <span class="icon">+</span>
@@ -368,7 +538,7 @@
     </button>
   </div>
   <!-- Stage 2 新增：会话搜索框 -->
-  <div id="session-search-wrap">
+  <div id="session-search-wrap" class="tab-panel" data-panel="sessions">
     <input
       type="text"
       id="sessionSearch"
@@ -378,7 +548,17 @@
     />
     <button id="searchClearBtn" title="清空" style="display:none;">×</button>
   </div>
-  <div id="sessionList"></div>
+  <div id="sessionList" class="tab-panel" data-panel="sessions"></div>
+  <!-- Stage 2C 新增：文档库面板 -->
+  <div id="documentPanel" class="tab-panel" data-panel="documents" style="display:none;">
+    <div id="document-toolbar">
+      <button id="uploadDocBtn" title="上传新文档">+ 上传文档</button>
+    </div>
+    <div id="documentList"></div>
+    <div id="document-empty" style="padding:20px; color:#8e8ea0; font-size:12px; text-align:center;">
+      文档库为空<br>点击"+ 上传文档"添加
+    </div>
+  </div>
   <!-- Stage 2 新增：加载更多按钮 -->
   <div id="loadMoreWrap">
     <button id="loadMoreBtn" style="display:none;">加载更多 ↓</button>
@@ -1068,6 +1248,149 @@ const _origNew = newSession;
 
 setInterval(loadProviders, 30000);
 setInterval(() => { if (!isWaiting) loadSessions(true); }, 10000);
+
+// ============== Stage 2C: 文档库 tab + 上传 modal ==============
+
+const docPanelEl = document.getElementById('documentPanel');
+const docListEl = document.getElementById('documentList');
+const docEmptyEl = document.getElementById('document-empty');
+const uploadDocBtn = document.getElementById('uploadDocBtn');
+
+// tab 切换
+document.querySelectorAll('.sidebar-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const target = tab.dataset.tab;
+    document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.tab-panel').forEach(p => {
+      p.style.display = p.dataset.panel === target ? '' : 'none';
+    });
+    if (target === 'documents') loadDocuments();
+  });
+});
+
+// 加载文档列表
+async function loadDocuments() {
+  try {
+    const r = await fetch('/documents?page_size=50');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    renderDocumentList(d.documents);
+  } catch (e) {
+    console.error('Failed to load documents:', e);
+    docListEl.innerHTML = `<div style="padding:20px; color:#c53030; font-size:12px; text-align:center;">❌ 加载失败</div>`;
+    docEmptyEl.style.display = 'none';
+  }
+}
+
+function renderDocumentList(docs) {
+  docListEl.innerHTML = '';
+  if (!docs || docs.length === 0) {
+    docEmptyEl.style.display = 'block';
+    return;
+  }
+  docEmptyEl.style.display = 'none';
+  for (const d of docs) {
+    const item = document.createElement('div');
+    item.className = 'doc-item';
+    const created = new Date(d.created_at * 1000).toLocaleDateString();
+    item.innerHTML = `
+      <div class="doc-title" title="${escapeHtml(d.title)}">${escapeHtml(d.title)}</div>
+      <div class="doc-meta">
+        <span>📄 ${d.chunk_count} 段 · ${d.embedding_dim || '?'}d</span>
+        <span>${created}</span>
+      </div>
+      <button class="doc-delete" title="删除文档">×</button>
+    `;
+    item.querySelector('.doc-delete').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm(`删除文档 "${d.title}"？\n\n该文档的所有切片会被一并删除。`)) return;
+      try {
+        await fetch(`/documents/${d.id}`, { method: 'DELETE' });
+        loadDocuments();
+      } catch (err) {
+        alert('删除失败: ' + err.message);
+      }
+    });
+    item.addEventListener('click', () => {
+      // 点击文档展示 chunks 预览（先用 prompt 看内容）
+      const preview = `📄 ${d.title}\n\n` +
+        `来源: ${d.source || '(手动输入)'}\n` +
+        `类型: ${d.doc_type}\n` +
+        `切片数: ${d.chunk_count}\n` +
+        `Embedding: ${d.embedding_provider || '?'}/${d.embedding_model || '?'} (${d.embedding_dim || '?'}d)\n` +
+        `创建时间: ${new Date(d.created_at * 1000).toLocaleString()}`;
+      alert(preview);
+    });
+    docListEl.appendChild(item);
+  }
+}
+
+// 上传 modal
+const uploadModal = document.createElement('div');
+uploadModal.id = 'uploadDocModal';
+uploadModal.innerHTML = `
+  <div class="modal-content">
+    <h3>📚 上传文档到知识库</h3>
+    <label>文档标题</label>
+    <input type="text" id="docTitleInput" placeholder="例：RAG 入门教程" maxlength="255" />
+    <label>文档内容（支持长文本，会自动切片）</label>
+    <textarea id="docContentInput" placeholder="粘贴文档正文……"></textarea>
+    <label>来源（可选）</label>
+    <input type="text" id="docSourceInput" placeholder="文件名 / URL / 留空表示手动输入" />
+    <div class="modal-actions">
+      <button id="docCancelBtn">取消</button>
+      <button id="docSubmitBtn" class="primary">上传并 Embedding</button>
+    </div>
+  </div>
+`;
+document.body.appendChild(uploadModal);
+
+uploadDocBtn.addEventListener('click', () => {
+  uploadModal.classList.add('show');
+  document.getElementById('docTitleInput').focus();
+});
+document.getElementById('docCancelBtn').addEventListener('click', () => {
+  uploadModal.classList.remove('show');
+});
+uploadModal.addEventListener('click', (e) => {
+  if (e.target === uploadModal) uploadModal.classList.remove('show');
+});
+
+document.getElementById('docSubmitBtn').addEventListener('click', async () => {
+  const title = document.getElementById('docTitleInput').value.trim();
+  const content = document.getElementById('docContentInput').value.trim();
+  const source = document.getElementById('docSourceInput').value.trim() || 'manual';
+  if (!title || !content) {
+    alert('标题和内容不能为空');
+    return;
+  }
+  const submitBtn = document.getElementById('docSubmitBtn');
+  submitBtn.disabled = true;
+  submitBtn.textContent = '上传中...';
+  try {
+    const r = await fetch('/documents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, content, source, doc_type: 'text' }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    const doc = await r.json();
+    uploadModal.classList.remove('show');
+    document.getElementById('docTitleInput').value = '';
+    document.getElementById('docContentInput').value = '';
+    document.getElementById('docSourceInput').value = '';
+    loadDocuments();
+    alert(`✅ 上传成功\n\n文档 "${doc.title}" 已切为 ${doc.chunk_count} 段并 embedding 完成`);
+  } catch (err) {
+    alert('❌ 上传失败: ' + err.message);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = '上传并 Embedding';
+  }
+});
 </script>
 
 </body>
