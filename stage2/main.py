@@ -569,6 +569,18 @@ def index():
     return {"hint": "static/index.html not found", "docs": "/docs"}
 
 
+@app.get("/favicon.ico")
+def favicon():
+    """静默 favicon 请求（浏览器自动请求，避免 404 噪音）"""
+    # 1x1 透明 PNG（最小响应体）
+    import base64
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+    )
+    from fastapi.responses import Response
+    return Response(content=png, media_type="image/png")
+
+
 @app.get("/health")
 def health(db: DbSession = Depends(get_db)):
     """健康检查 + 数据库统计"""
@@ -666,79 +678,92 @@ def chat_stream(req: ChatRequest, db: DbSession = Depends(get_db)):
     messages.append({"role": "user", "content": req.message})
 
     def event_generator():
-        # 第一帧：发送 session_id + provider 选择
-        primary = router.pick(req.provider, req.model)
-        yield f"event: start\ndata: {json.dumps({'session_id': sid, 'primary_provider': primary.config.name if primary else None}, ensure_ascii=False)}\n\n"
-
-        full_reply = ""
-        full_reasoning = ""
-        provider_used = None
-        model_used = None
-        fallback_used = False
-        usage = {}
-        for chunk in router.chat_stream_with_fallback(
-            messages,
-            provider_name=req.provider,
-            model_name=req.model,
-            temperature=req.temperature,
-            max_tokens=settings.max_tokens,
-        ):
-            if not chunk.get("ok"):
-                yield f"event: error\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        # 整段用 try/except 包裹，任何异常都 yield error 事件给前端，
+        # 避免 generator 崩溃导致 SSE 连接中断、前端"什么也收不到"
+        try:
+            # 第一帧：发送 session_id + provider 选择
+            primary = router.pick(req.provider, req.model)
+            if primary is None:
+                # provider 名不存在（前端传了未配置的 provider）
+                avail = [p.config.name for p in providers]
+                yield f"event: error\ndata: {json.dumps({'error_type': 'unknown_provider', 'error_msg': f'provider={req.provider!r} 未配置；可用: {avail}'}, ensure_ascii=False)}\n\n"
                 return
-            if chunk.get("is_final"):
-                full_reply = chunk.get("reply", "")
-                full_reasoning = chunk.get("reasoning", "")
-                provider_used = chunk.get("provider")
-                model_used = chunk.get("model")
-                usage = chunk.get("usage", {})
-                # 完整事件：含 reasoning（用于历史会话展示）
-                yield (
-                    f"event: done\n"
-                    f"data: {json.dumps({'usage': usage, 'provider': provider_used, 'reasoning': full_reasoning}, ensure_ascii=False)}\n\n"
-                )
-            else:
-                # 推理过程 / 正常内容 各自独立 SSE event
-                event_type = chunk.get("event", "delta")  # reasoning_delta / content_delta
-                if chunk.get("fallback_used"):
-                    fallback_used = True
-                yield (
-                    f"event: {event_type}\n"
-                    f"data: {json.dumps({'delta': chunk.get('delta', ''), 'provider': chunk.get('provider')}, ensure_ascii=False)}\n\n"
-                )
+            yield f"event: start\ndata: {json.dumps({'session_id': sid, 'primary_provider': primary.config.name}, ensure_ascii=False)}\n\n"
 
-        # 完成后写库
-        if full_reply:
-            try:
-                # 重新获取 repo（generator 在另一个上下文）
-                db2 = SessionLocal()
+            full_reply = ""
+            full_reasoning = ""
+            provider_used = None
+            model_used = None
+            fallback_used = False
+            usage = {}
+            for chunk in router.chat_stream_with_fallback(
+                messages,
+                provider_name=req.provider,
+                model_name=req.model,
+                temperature=req.temperature,
+                max_tokens=settings.max_tokens,
+            ):
+                if not chunk.get("ok"):
+                    yield f"event: error\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                    return
+                if chunk.get("is_final"):
+                    full_reply = chunk.get("reply", "")
+                    full_reasoning = chunk.get("reasoning", "")
+                    provider_used = chunk.get("provider")
+                    model_used = chunk.get("model")
+                    usage = chunk.get("usage", {})
+                    # 完整事件：含 reasoning（用于历史会话展示）
+                    yield (
+                        f"event: done\n"
+                        f"data: {json.dumps({'usage': usage, 'provider': provider_used, 'reasoning': full_reasoning}, ensure_ascii=False)}\n\n"
+                    )
+                else:
+                    # 推理过程 / 正常内容 各自独立 SSE event
+                    event_type = chunk.get("event", "delta")  # reasoning_delta / content_delta
+                    if chunk.get("fallback_used"):
+                        fallback_used = True
+                    yield (
+                        f"event: {event_type}\n"
+                        f"data: {json.dumps({'delta': chunk.get('delta', ''), 'provider': chunk.get('provider')}, ensure_ascii=False)}\n\n"
+                    )
+
+            # 完成后写库
+            if full_reply:
                 try:
-                    repo2 = SessionRepository(db2)
-                    # 防御：确认 session 还在（如果 endpoint commit 失败，这里就找不到）
-                    if not repo2.get(sid):
-                        log.error(f"❌ session={sid[:8]}... 不存在，写库失败（endpoint commit 漏了？）")
-                        return
-                    repo2.append_message(
-                        sid=sid, role="user", content=req.message,
-                        provider=req.provider, model=req.model,
-                    )
-                    repo2.append_message(
-                        sid=sid, role="assistant", content=full_reply,
-                        reasoning=full_reasoning or None,
-                        provider=provider_used, model=model_used,
-                        prompt_tokens=usage.get("prompt_tokens", 0),
-                        completion_tokens=usage.get("completion_tokens", 0),
-                        total_tokens=usage.get("total_tokens", 0),
-                        is_fallback=fallback_used,
-                    )
-                    db2.commit()
-                    log.info(f"💾 session={sid[:8]}... 已持久化（{len(full_reply)} 字 + {len(full_reasoning)} 字思考）")
-                finally:
-                    db2.close()
-            except Exception as e:
-                log.error(f"❌ 持久化失败: {e}")
-        else:
-            log.warning(f"⚠️ 流式未产出 reply，跳过写库 session={sid[:8]}...")
+                    db2 = SessionLocal()
+                    try:
+                        repo2 = SessionRepository(db2)
+                        if not repo2.get(sid):
+                            log.error(f"❌ session={sid[:8]}... 不存在，写库失败（endpoint commit 漏了？）")
+                            return
+                        repo2.append_message(
+                            sid=sid, role="user", content=req.message,
+                            provider=req.provider, model=req.model,
+                        )
+                        repo2.append_message(
+                            sid=sid, role="assistant", content=full_reply,
+                            reasoning=full_reasoning or None,
+                            provider=provider_used, model=model_used,
+                            prompt_tokens=usage.get("prompt_tokens", 0),
+                            completion_tokens=usage.get("completion_tokens", 0),
+                            total_tokens=usage.get("total_tokens", 0),
+                            is_fallback=fallback_used,
+                        )
+                        db2.commit()
+                        log.info(f"💾 session={sid[:8]}... 已持久化（{len(full_reply)} 字 + {len(full_reasoning)} 字思考）")
+                    finally:
+                        db2.close()
+                except Exception as e:
+                    log.error(f"❌ 持久化失败: {e}")
+            else:
+                log.warning(f"⚠️ 流式未产出 reply，跳过写库 session={sid[:8]}...")
+        except Exception as e:
+            # 任何 yield 抛异常都被这里捕获，保证 SSE 连接优雅关闭 + 报错给前端
+            log.exception(f"❌ event_generator 异常: {e}")
+            try:
+                yield f"event: error\ndata: {json.dumps({'error_type': 'internal_error', 'error_msg': str(e)}, ensure_ascii=False)}\n\n"
+            except Exception:
+                pass
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
